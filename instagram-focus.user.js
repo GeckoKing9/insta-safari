@@ -30,7 +30,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '14';
+  const SITE_VERSION = '15';
   const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -100,7 +100,10 @@
   let recheckTimer = null;
   const recheckLock = () => {
     clearTimeout(recheckTimer);
-    const apply = () => lockSwipe(CFG.singleReelOnly && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+    const apply = () => {
+      lockSwipe(CFG.singleReelOnly && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+      if (locked) pin(); // a box that appeared while already locked is pinned now, not at the next tick
+    };
     apply();
     recheckTimer = setTimeout(apply, 400); // once more after the overlay has laid out
   };
@@ -115,18 +118,27 @@
     v.addEventListener('loadeddata', tryPlay, { once: true });
     setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);
   };
+  let verdicts = new WeakMap(); // target -> shouldBlock verdict, so wheel bursts don't re-walk the ancestors
   const shouldBlock = (target) => {
     if (!(target instanceof Element)) return false;
+    if (verdicts.has(target)) return verdicts.get(target);
+    let verdict = false; // not inside a reel box at all
     for (let n = target; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
-      if (pinned.has(n)) return true; // reached the pinned reel box without crossing another scroller
+      if (pinned.has(n)) { verdict = true; break; } // reached the pinned reel box without crossing another scroller
       const s = getComputedStyle(n);
-      if (/auto|scroll/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 10) return false; // e.g. the comments sheet
+      if (/auto|scroll/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 10) break; // e.g. the comments sheet
     }
-    return false; // not inside a reel box at all
+    verdicts.set(target, verdict);
+    return verdict;
   };
-  const onStart = (e) => { startY = e.touches[0]?.clientY ?? null; blocking = shouldBlock(e.target); };
+  const onStart = (e) => {
+    if (e.touches.length !== 1) return; // a second finger does not restart the gesture
+    pin(); // the box the finger is on may have appeared since the last tick
+    startY = e.touches[0].clientY; blocking = shouldBlock(e.target);
+  };
   const onMove = (e) => { if (blocking) stop(e); };
   const onEnd = (e) => {
+    if (e.touches.length > 0) return; // other fingers still down
     const y = e.changedTouches[0]?.clientY;
     const swipe = blocking && startY !== null && y !== undefined && Math.abs(y - startY) > 20;
     if (swipe) stop(e);
@@ -135,15 +147,24 @@
   };
   const onWheel = (e) => { if (shouldBlock(e.target)) stop(e); };
   const handlers = [['touchstart', onStart], ['touchmove', onMove], ['touchend', onEnd], ['touchcancel', onEnd], ['wheel', onWheel]];
-  const holdScroll = (e) => { const top = pinned.get(e.target); if (top !== undefined && e.target.scrollTop !== top) e.target.scrollTop = top; };
+  // A reel-sized jump (auto-advance) or any movement while a finger is down is undone; a small
+  // programmatic adjustment with no finger down (Instagram re-centring the reel) becomes the new held position.
+  const holdScroll = (e) => {
+    const el = e.target, top = pinned.get(el);
+    if (top === undefined || el.scrollTop === top) return;
+    if (startY !== null || Math.abs(el.scrollTop - top) >= el.clientHeight * 0.5) el.scrollTop = top;
+    else pinned.set(el, el.scrollTop);
+  };
   const pin = () => {
-    for (const el of [...pinned.keys()]) if (!el.isConnected) { el.removeEventListener('scroll', holdScroll); pinned.delete(el); }
+    let changed = false;
+    for (const el of [...pinned.keys()]) if (!el.isConnected) { el.removeEventListener('scroll', holdScroll); pinned.delete(el); changed = true; }
     for (const v of document.querySelectorAll('video')) {
       const box = reelBoxOf(v);
-      if (box && !pinned.has(box)) { pinned.set(box, box.scrollTop); box.addEventListener('scroll', holdScroll, { passive: true }); }
+      if (box && !pinned.has(box)) { pinned.set(box, box.scrollTop); box.addEventListener('scroll', holdScroll, { passive: true }); changed = true; }
     }
+    if (changed) verdicts = new WeakMap();
   };
-  const unpin = () => { for (const el of pinned.keys()) el.removeEventListener('scroll', holdScroll); pinned.clear(); };
+  const unpin = () => { for (const el of pinned.keys()) el.removeEventListener('scroll', holdScroll); pinned.clear(); verdicts = new WeakMap(); };
   const lockSwipe = (on) => {
     if (on === locked) return;
     locked = on;
@@ -174,6 +195,7 @@
   // label hides nothing, so a page can never go blank.
   const LEAF = 'span, h2, h3, h4, div, button, a';
   const sponsoredWords = [...(CFG.hideSponsored ? WORDS.sponsored : []), ...(CFG.hidePaidPartnership ? WORDS.partnership : [])];
+  const isOffsiteLink = (a) => !!a && /l\.instagram\.com|^https?:\/\/(?!(www\.)?instagram\.com\/)/.test(a.href);
   const hide = (node, why) => {
     if (!node || node === document.body || node === document.documentElement || node.style.display === 'none') return;
     node.style.display = 'none'; hiddenCount++;
@@ -195,7 +217,8 @@
     if (!t || t.length > 40) return;
     const post = el.closest('article');
     if (sponsoredWords.some((w) => t.startsWith(w))) hide(post, 'ad:' + t.slice(0, 12)); // "Sponsored · 2h"
-    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && el.closest('a, button, [role="button"]')) hide(post, 'cta:' + t.slice(0, 12));
+    // an ad's call-to-action is an off-site link (through l.instagram.com); an organic "Learn more" overlay is not
+    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && isOffsiteLink(el.closest('a[href]'))) hide(post, 'cta:' + t.slice(0, 12));
     else if (WORDS.suggested.includes(t)) {
       if (post) { if (CFG.hideSuggestedPosts) hide(post, 'suggested-post'); }
       else if (CFG.hideSuggestedAccounts) hide(carouselOf(el), 'suggested-accounts');

@@ -60,6 +60,10 @@
         ${[1,2,3,4,5].map(i => `<a data-spa href="/u${i}/">user${i}</a>`).join('')}</div></div>`;
       articles += post(4, 'My cat');
       articles += post(5, 'Something', `<div><span>${T.suggestedPosts}</span></div>`);
+      // an ad whose label text is unknown but whose call-to-action is an off-site link
+      articles += post(6, 'Great shoes', `<div><a href="https://l.instagram.com/?u=https%3A%2F%2Fshoes.example%2F"><span>Shop now</span></a></div>`);
+      // an organic post with a sensitive-content overlay: a "Learn more" button that goes nowhere off-site
+      articles += post(7, 'Sensitive post', `<div><button><span>Learn more</span></button></div>`);
       const stress = localStorage.getItem('stress') === '1';
       if (stress) for (let i = 10; i < 310; i++) articles += post(i, 'stress post ' + i);
       return `${banner()}${nav()}<main><div id="variant">${variant}</div><section id="feed">${articles}</section></main>${dialog()}`;

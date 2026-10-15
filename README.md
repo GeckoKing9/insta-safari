@@ -1,4 +1,4 @@
-# insta-chrome: Instagram Focus
+# insta-safari: Instagram Focus
 
 A Safari userscript that makes instagram.com usable on an iPhone without the attention traps: no Reels feed or tab, no Explore, no ads, no "Suggested for you" accounts carousel, no "open the app" prompts, and a reel someone sends you (as a page or as the DM overlay) opens, is started if Safari left it paused, but cannot be swiped into the next one. Recommended posts and the Following feed are toggles (`hideSuggestedPosts`, `followingFeed`). Runs in Safari through the free, open-source **Userscripts** app. Nothing is installed outside the App Store; the login never leaves Safari and Meta.
 

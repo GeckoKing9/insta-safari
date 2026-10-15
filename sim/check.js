@@ -58,6 +58,9 @@ async function main() {
       if (await visible(page, 'article[data-id="2"]')) fail('S1', 'sponsored post visible');
       if (!(await visible(page, 'article[data-id="5"]'))) fail('S1', 'recommended ("Suggested posts") article hidden although hideSuggestedPosts is off');
       if (await visible(page, '.sugg')) fail('S1', 'suggested accounts carousel visible');
+      // S14: ad recognised by its off-site call-to-action; organic post with a "Learn more" button stays
+      if (await visible(page, 'article[data-id="6"]')) fail('S14', 'ad with an off-site "Shop now" link visible');
+      if (!(await visible(page, 'article[data-id="7"]'))) fail('S14', 'organic post with a "Learn more" button was hidden');
       await ctx.close();
     }
     // S2 reels feed, S3 explore
@@ -134,7 +137,7 @@ async function main() {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(700);
       const n = await visibleCount(page, 'article');
-      if (n !== 4) fail('S10', `expected 4 visible articles (1,3,4,5), got ${n}`);
+      if (n !== 5) fail('S10', `expected 5 visible articles (1,3,4,5,7), got ${n}`);
       if (!(await visible(page, 'nav'))) fail('S10', 'nav hidden');
       await ctx.close();
     }
@@ -155,6 +158,11 @@ async function main() {
       await page.evaluate(() => { window.__dmTouch = false; });
       await swipeUp(page, 200, 300); await sleep(300);
       if (!(await page.evaluate(() => window.__dmTouch))) fail('S13', 'DM list no longer receives touches after the overlay closed (lock not released)');
+      // S15: swipe immediately after the overlay opens, before any 400/500 ms tick could pin the box
+      await page.evaluate(() => document.getElementById('reelcard').scrollIntoView());
+      await page.click('#reelcard'); await sleep(40);
+      await swipeUp(page, 200, 400); await sleep(300);
+      if (await page.evaluate(() => window.__oadvanced)) fail('S15', 'a swipe right after the overlay opened advanced the reel (box not pinned yet)');
       await ctx.close();
     }
     // S11 main-thread jank under stress: event-loop lag with the script vs without

@@ -30,8 +30,8 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '13';
-  const DEBUG = true; // status strip at the bottom + event log in <html data-focus-log>; set false once the bugs are gone
+  const SITE_VERSION = '14';
+  const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
   const logs = [];
@@ -106,9 +106,12 @@
   };
   // A reel that opens paused: Instagram calls play() after the data arrives, outside the tap that opened
   // it, and Safari refuses. Starting it ourselves from the same moment works for a muted video.
+  // Only the reel on screen: the overlay preloads the next reels below it, equally fullscreen-sized, and
+  // starting those too makes them audible once the sound is turned on.
+  const onScreen = (v) => { const r = v.getBoundingClientRect(); return r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
   const nudgePlay = (v) => {
     if (!CFG.autoPlayReels) return;
-    const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v)) { v.play().then(() => log('play', 'started paused reel')).catch(() => {}); } };
+    const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v) && onScreen(v)) { v.play().then(() => log('play', 'started paused reel')).catch(() => {}); } };
     v.addEventListener('loadeddata', tryPlay, { once: true });
     setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);
   };

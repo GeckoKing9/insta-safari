@@ -11,7 +11,9 @@ A Safari userscript that makes instagram.com usable on an iPhone without the att
 | `sim/check.js`, `sim/app.html`, `sim/server.py` | headless-Chromium harness: 12 real-use scenarios against a model of Instagram's mobile site (`node sim/check.js`, ~30 s) |
 | `sim/device-attach.sh` | hands the iPhone from Windows to WSL (usbipd-win) and starts the device daemon cleanly |
 | `sim/pages.py` | on-device checker: is the script active in a real Safari tab (not a Home Screen web app)? |
-| `sim/verify_lock.py`, `sim/device_check.py`, `sim/dm_tap.py`, `sim/probe.py`, `sim/diag.py` | other on-device probes through Safari Web Inspector |
+| `sim/_device.py` | shared connect / tab-pick / evaluate helpers for the on-device scripts |
+| `sim/reload_all.py` | reloads every open Instagram tab so it picks up a freshly pushed script |
+| `sim/verify_lock.py` | drives a tab through feed, reel page, wheel and in-page navigation, reading the installed script's state |
 
 ## Workflow
 
@@ -23,6 +25,8 @@ A Safari userscript that makes instagram.com usable on an iPhone without the att
 5. Commit; tag releases.
 
 Rollback: `git checkout v0.1 -- instagram-focus.user.js`, then step 3.
+
+`v0.1` is the snapshot the user approved on the phone, not a green build: its checker fails scenario 12 (comments on a reel), fixed in v0.2.
 
 ## Things learned on the device (iOS 26.6.1)
 

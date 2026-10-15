@@ -30,12 +30,18 @@ async function swipeUp(page, x, y) {
   await cdp.detach();
 }
 
-const visible = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return !!e && getComputedStyle(e).display !== 'none' && e.offsetParent !== null; }, sel);
-const visibleCount = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => getComputedStyle(e).display !== 'none' && e.offsetParent !== null).length, sel);
+// checkVisibility() also covers position:fixed elements, whose offsetParent is always null
+const visible = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return !!e && e.checkVisibility(); }, sel);
+const visibleCount = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.checkVisibility()).length, sel);
+
+async function serverUp() { try { const r = await fetch(BASE + '/'); return r.ok; } catch { return false; } }
 
 async function main() {
-  const server = spawn('python3', [path.join(__dirname, 'server.py'), String(PORT)], { stdio: 'ignore' });
-  await sleep(400);
+  if (await serverUp()) { console.log(`FAIL harness: something already listens on ${BASE} (a stale fixture server?)`); process.exit(2); }
+  const server = spawn('python3', [path.join(__dirname, 'server.py'), String(PORT)], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let serverErr = ''; server.stderr.on('data', (d) => { serverErr += d; });
+  for (let i = 0; i < 30 && !(await serverUp()); i++) await sleep(100);
+  if (!(await serverUp())) { console.log('FAIL harness: fixture server did not start: ' + serverErr.slice(0, 200)); server.kill(); process.exit(2); }
   const browser = await chromium.launch();
   try {
     // S1 home load

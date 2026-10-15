@@ -33,6 +33,7 @@ Rollback: `git checkout v0.1 -- instagram-focus.user.js`, then step 3.
 - A Home Screen icon opens as a standalone web app by default on iOS 26; Safari extensions never run there. Add the icon with "Open as Web App" off, or, with another default browser, use a Shortcut that opens `x-safari-https://www.instagram.com/?variant=following`.
 - Userscripts shows "version null" until its per-site prompt is accepted in the tab; a hand injection working while the extension is silent means permission, not code.
 - `/reel/ID` is a standalone single-video page; `/reels/ID` is the endless feed scroller. Both get the lock.
-- The USB/IP link (usbipd → WSL) resets after a few inspector sessions: one session per attach, re-attach between runs.
+- Never start `usbmuxd` by hand: Ubuntu's socket-activated one (systemd/udev) grabs the phone on its own, and two daemons fighting for the interface (`LIBUSB_ERROR_BUSY`) was what made the USB link die after a session or two all afternoon. `sim/device-attach.sh` only does the usbipd hand-off now.
+- Page-level probes (Web Inspector `Runtime.evaluate`) stall while the phone is locked; file transfers (AFC) still work locked. Keep the screen on during probes.
 - `?variant=following` is honoured; the nav links are exactly `/reels/`, `/explore/`, `/direct/inbox/`.
 - No ad has appeared in the Following feed during any probe, so the ad label text is unverified; the script matches Sponsored / Sponsorisé / Commandité / Publicité and ad call-to-action buttons.

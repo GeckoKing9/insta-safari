@@ -13,10 +13,13 @@ const fails = [];
 const fail = (id, why) => fails.push(`FAIL ${id}: ${why}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function newPage(browser, { script = true, storage = {} } = {}) {
+// cfg: CFG lines to flip, e.g. { 'hideSearch: false,': 'hideSearch: true,' }; a line that is not in the script fails loudly
+async function newPage(browser, { script = true, storage = {}, cfg = {} } = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 15 Pro Max'], locale: 'en-CA' });
   await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
-  if (script) await ctx.addInitScript(SCRIPT);
+  let src = SCRIPT;
+  for (const [from, to] of Object.entries(cfg)) { if (!src.includes(from)) throw new Error(`CFG line not found: ${from}`); src = src.replace(from, to); }
+  if (script) await ctx.addInitScript(src);
   const page = await ctx.newPage();
   return { ctx, page };
 }
@@ -30,9 +33,20 @@ async function swipeUp(page, x, y) {
   await cdp.detach();
 }
 
-// checkVisibility() also covers position:fixed elements, whose offsetParent is always null
-const visible = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return !!e && e.checkVisibility(); }, sel);
-const visibleCount = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.checkVisibility()).length, sel);
+// checkVisibility() also covers position:fixed elements, whose offsetParent is always null; visibility:hidden counts as hidden
+const VIS = { visibilityProperty: true };
+const visible = (page, sel) => page.evaluate(([s, o]) => { const e = document.querySelector(s); return !!e && e.checkVisibility(o); }, [sel, VIS]);
+const visibleCount = (page, sel) => page.evaluate(([s, o]) => [...document.querySelectorAll(s)].filter((e) => e.checkVisibility(o)).length, [sel, VIS]);
+// what a finger at the centre of the element would land on: the element itself, or something under it if it is hidden
+const tappable = (page, sel) => page.evaluate((s) => {
+  const e = document.querySelector(s); if (!e) return false;
+  e.scrollIntoView({ block: 'center' });
+  const r = e.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  return !!hit && (hit === e || e.contains(hit));
+}, sel);
+
+// a tap that cannot happen (element missing or hidden) is a scenario failure, not a harness crash
+const tapOr = (page, sel, id) => page.click(sel, { timeout: 3000 }).then(() => true, () => { fail(id, `could not tap ${sel}, url=${page.url()}`); return false; });
 
 async function serverUp() { try { const r = await fetch(BASE + '/'); return r.ok; } catch { return false; } }
 
@@ -50,7 +64,7 @@ async function main() {
       await page.goto(BASE + '/'); await sleep(700);
       if (page.url().includes('variant=')) fail('S1', `Home feed expected (followingFeed is off), url=${page.url()}`);
       if (await visible(page, 'a[href="/reels/"]')) fail('S1', 'Reels nav link visible');
-      if (await visible(page, 'a[href^="/explore"]')) fail('S1', 'Explore nav link visible');
+      if (!(await visible(page, 'a[href="/explore/"]'))) fail('S1', 'search tab link hidden (search must stay reachable)');
       if (!(await visible(page, '#feed'))) fail('S1', 'feed root hidden');
       if (!(await visible(page, 'article[data-id="1"]'))) fail('S1', 'normal post 1 hidden');
       if (!(await visible(page, 'article[data-id="4"]'))) fail('S1', 'normal post 4 hidden');
@@ -63,11 +77,77 @@ async function main() {
       if (!(await visible(page, 'article[data-id="7"]'))) fail('S14', 'organic post with a "Learn more" button was hidden');
       await ctx.close();
     }
-    // S2 reels feed, S3 explore
-    for (const [id, p] of [['S2', '/reels/'], ['S3', '/explore/']]) {
+    // S2 reels feed
+    {
       const { ctx, page } = await newPage(browser);
-      await page.goto(BASE + p); await sleep(900);
-      if (new URL(page.url()).pathname !== '/') fail(id, `${p} not redirected, url=${page.url()}`);
+      await page.goto(BASE + '/reels/'); await sleep(900);
+      if (new URL(page.url()).pathname !== '/') fail('S2', `/reels/ not redirected, url=${page.url()}`);
+      await ctx.close();
+    }
+    // S3 search tab, opened from the nav: it stays, the search box works, the recommended grid under it is
+    // hidden (hideExplore) and its tiles cannot be tapped
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/'); await sleep(600);
+      await tapOr(page, 'a[href="/explore/"]', 'S3');
+      // checked at once: the grid must already be hidden when Instagram renders it, not after a polling tick
+      const early = await visibleCount(page, '#exploregrid a');
+      if (early) fail('S3', `${early} recommended grid tiles visible right after opening the search tab`);
+      await sleep(700);
+      if (new URL(page.url()).pathname !== '/explore/') fail('S3', `search tab did not stay open, url=${page.url()}`);
+      if (!(await visible(page, '#searchbox'))) fail('S3', 'search box hidden on the search tab');
+      const shown = await visibleCount(page, '#exploregrid a');
+      if (shown) fail('S3', `${shown} recommended grid tiles visible on the search tab`);
+      for (const href of await page.evaluate(() => [...document.querySelectorAll('#exploregrid a')].map((a) => a.getAttribute('href')))) {
+        if (await tappable(page, `#exploregrid a[href="${href}"]`)) fail('S3', `hidden grid tile ${href} can still be tapped`);
+      }
+      await ctx.close();
+    }
+    // S16 searching: box -> results (accounts, hashtags) -> keyword grid; a reel opened from the results is
+    // locked to that one reel; back on the results the grid is still there; hashtag pages show their grid
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/explore/'); await sleep(700);
+      if (await tapOr(page, '#searchbox', 'S16')) {
+        await sleep(400);
+        if (new URL(page.url()).pathname !== '/explore/search/') fail('S16', `search page did not open, url=${page.url()}`);
+        if (!(await visible(page, '#acclink')) || !(await visible(page, '#taglink'))) fail('S16', 'search results (account / hashtag) hidden');
+        await page.fill('#searchbox', 'cats'); await page.press('#searchbox', 'Enter'); await sleep(700);
+        if (!page.url().includes('/explore/search/keyword/')) fail('S16', `keyword search did not run, url=${page.url()}`);
+        const kw = await visibleCount(page, '#kwgrid a');
+        if (kw !== 2) fail('S16', `keyword results grid: ${kw} of 2 tiles visible`);
+        if (await tapOr(page, '#kwreel', 'S16')) {
+          await sleep(700);
+          if (new URL(page.url()).pathname !== '/reel/K1/') fail('S16', `reel from the results did not open, url=${page.url()}`);
+          await swipeUp(page, 200, 400); await sleep(300);
+          if (await page.evaluate(() => window.__advanced)) fail('S16', 'swipe on a reel opened from search advanced to the next reel');
+          await page.goBack(); await sleep(700);
+          if (!(await visible(page, '#kwreel'))) fail('S16', `keyword grid hidden after coming back from the reel, url=${page.url()}`);
+        }
+      }
+      await page.goto(BASE + '/explore/tags/cats/'); await sleep(900);
+      if (new URL(page.url()).pathname !== '/explore/tags/cats/') fail('S16', `hashtag page redirected, url=${page.url()}`);
+      if (!(await visible(page, '#taggrid a'))) fail('S16', 'hashtag results grid hidden');
+      await ctx.close();
+    }
+    // S18 hideSearch: true is the v15 behaviour: no search tab link, /explore/ pages redirect home
+    {
+      const { ctx, page } = await newPage(browser, { cfg: { 'hideSearch: false,': 'hideSearch: true,' } });
+      await page.goto(BASE + '/'); await sleep(600);
+      if (await visible(page, 'a[href="/explore/"]')) fail('S18', 'search tab link visible with hideSearch on');
+      for (const p of ['/explore/', '/explore/tags/cats/']) {
+        await page.goto(BASE + p); await sleep(900);
+        if (new URL(page.url()).pathname !== '/') fail('S18', `${p} not redirected with hideSearch on, url=${page.url()}`);
+      }
+      await ctx.close();
+    }
+    // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/someone/reel/T1/'); await sleep(700);
+      if (!(await visible(page, '#viewer'))) fail('S17', `/username/reel/ID did not open, url=${page.url()}`);
+      await swipeUp(page, 200, 400); await sleep(300);
+      if (await page.evaluate(() => window.__advanced)) fail('S17', 'swipe on a /username/reel/ID page advanced to the next reel');
       await ctx.close();
     }
     // S4 DM -> reel, swipe blocked; S5 tap works; S6 back to DM scroll released
@@ -78,7 +158,7 @@ async function main() {
       await page.click('#reellink'); await sleep(600);
       if (new URL(page.url()).pathname !== '/reel/ABC123/') fail('S4', `reel did not open, url=${page.url()}`);
       if (!(await visible(page, '#viewer'))) fail('S4', 'reel viewer not visible');
-      await swipeUp(page, 200, 500); await sleep(300);
+      await swipeUp(page, 200, 400); await sleep(300);
       const adv = await page.evaluate(() => window.__advanced);
       if (adv || new URL(page.url()).pathname !== '/reel/ABC123/') fail('S4', `swipe advanced to next reel, url=${page.url()}`);
       // S12: touch moves that start on the comments sheet must reach it while the reel lock holds

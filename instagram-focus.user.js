@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Instagram Focus
-// @description  Instagram web without the Reels feed, Explore, ads, suggested posts or "open the app" prompts. Toggles below.
+// @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested posts or "open the app" prompts. Toggles below.
 // @match        https://www.instagram.com/*
 // @run-at       document-start
 // @inject-into  content
@@ -11,7 +11,8 @@
     hideReelsFeed: true,        // the Reels tab and the endless /reels/ feed
     singleReelOnly: true,       // a reel someone sends you still opens, but swiping to the next one is blocked
     autoPlayReels: true,        // a reel that opens paused (Safari blocked Instagram's autoplay) is started for you
-    hideExplore: true,          // Explore / search tab + /explore/ pages
+    hideExplore: true,          // the recommended grid on the search tab; search itself (box, results, hashtag and place pages) stays
+    hideSearch: false,          // the whole search tab and every /explore/ page (the v15 behaviour)
     hideSponsored: true,        // ads in the feed
     hidePaidPartnership: false, // creators' "Paid partnership" posts (not Instagram ads)
     hideSuggestedAccounts: true, // the "Suggested for you" accounts carousel in the home feed
@@ -30,7 +31,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '15';
+  const SITE_VERSION = '16';
   const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -62,19 +63,23 @@
 
   // 1. Routing: Instagram is a single-page app, so this runs at start and on every URL change
   const isReelsFeed = (p) => /^\/reels\/?$/.test(p);
-  const isReelPage = (p) => /^\/reels?\/(?!audio\/)[^/]+/.test(p); // /reels/audio/… is a sound page, not a reel
+  // /reel/ID, /reels/ID and /username/reel/ID (newer grid links); /reels/audio/… is a sound page, not a reel
+  const isReelPage = (p) => /^\/(?:[^/]+\/)?reels?\/(?!audio\/)[^/]+/.test(p);
   // The Following-feed switch runs on the initial load only: Instagram may rewrite the URL afterwards
   // (dropping the query), and re-applying it from the watcher would reload the page forever.
   const route = (firstLoad = false) => {
     const p = location.pathname;
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
-    if (CFG.hideExplore && p.startsWith('/explore')) { location.replace('/'); return; }
+    if (CFG.hideSearch && p.startsWith('/explore')) { location.replace('/'); return; }
+    // the search tab itself (/explore/): the CSS hides its recommended grid; results pages are deeper paths
+    document.documentElement?.toggleAttribute('data-focus-explore', CFG.hideExplore && /^\/explore\/?$/.test(p));
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
     recheckLock();
     log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
-  setInterval(() => { if (location.href !== last) { last = location.href; route(); } }, 300);
+  const routeIfMoved = () => { if (location.href !== last) { last = location.href; route(); } };
+  setInterval(routeIfMoved, 300); // also run from the mutation observer, so a new page is routed before it paints
 
   // 2. Swipe lock, engaged by URL (/reel/ID and /reels/ID) or by content: a reel opened from a DM is an
   // overlay on top of the DM page, the URL does not change, so a near-fullscreen video sitting in a
@@ -177,7 +182,9 @@
   // 3. Links: matched by href, so Instagram's class-name churn doesn't break them
   const css = [];
   if (CFG.hideReelsFeed) css.push('a[href="/reels/"]{display:none!important}'); // exact: single-reel links stay
-  if (CFG.hideExplore) css.push('a[href^="/explore"]{display:none!important}');
+  if (CFG.hideSearch) css.push('a[href^="/explore"]{display:none!important}');
+  // visibility, not display: the tiles keep their space, so Instagram's grid never looks empty and keeps loading more
+  if (CFG.hideExplore) css.push(['/p/', '/reel/', '/reels/', '/tv/'].map((h) => `html[data-focus-explore] a[href*="${h}"]:not([href="/reels/"])`).join(',') + '{visibility:hidden!important}');
   if (CFG.hideAppPrompts) css.push('a[href^="instagram://"],a[href*="apps.apple.com"],a[href^="itms-apps"]{display:none!important}');
   onRoot(() => {
     const style = document.createElement('style');
@@ -236,6 +243,7 @@
   let flushTimer = null;
   const flush = () => { flushTimer = null; for (const n of pending) scan(n); pending.clear(); };
   const onMutations = (muts) => {
+    routeIfMoved();
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }

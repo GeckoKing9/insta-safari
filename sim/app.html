@@ -68,7 +68,26 @@
       if (stress) for (let i = 10; i < 310; i++) articles += post(i, 'stress post ' + i);
       return `${banner()}${nav()}<main><div id="variant">${variant}</div><section id="feed">${articles}</section></main>${dialog()}`;
     },
-    explore() { return `${nav()}<main id="explore"><h2>Explore</h2></main>`; },
+    // the search tab: search box on top, recommended grid below (tiles link as /p/ID, /reel/ID or /user/reel/ID)
+    explore() {
+      const tiles = ['/p/E1/', '/reel/E2/', '/someone/reel/E3/', '/p/E4/', '/someone/p/E5/', '/reels/E6/', '/tv/E7/']
+        .map((h) => `<a data-spa href="${h}" style="display:block;width:33%;height:120px;background:#ccc">tile</a>`).join('');
+      return `${nav()}<main id="explore"><input id="searchbox" type="text" placeholder="Search"><div id="exploregrid" style="display:flex;flex-wrap:wrap">${tiles}</div></main>`;
+    },
+    search() {
+      return `${nav()}<main id="search"><input id="searchbox" type="text" placeholder="Search"><div id="results">
+        <a data-spa id="acclink" href="/catlover/">catlover</a> <a data-spa id="taglink" href="/explore/tags/cats/">#cats</a></div></main>`;
+    },
+    // results of a keyword search and of a hashtag: grids the user asked for, which must stay visible
+    keyword() {
+      return `${nav()}<main id="keyword"><div id="kwgrid" style="display:flex;flex-wrap:wrap">
+        <a data-spa id="kwreel" href="/reel/K1/" style="display:block;width:33%;height:120px;background:#ccc">reel</a>
+        <a data-spa href="/p/K2/" style="display:block;width:33%;height:120px;background:#ccc">post</a></div></main>`;
+    },
+    tag() {
+      return `${nav()}<main id="tag"><div id="taggrid" style="display:flex;flex-wrap:wrap">
+        <a data-spa href="/someone/reel/T1/" style="display:block;width:33%;height:120px;background:#ccc">reel</a></div></main>`;
+    },
     reelsfeed() { return `${nav()}<main id="reelsfeed"><h2>Reels feed</h2></main>`; },
     inbox() { return `${nav()}<main id="inbox"><a data-spa href="/direct/t/1/">Marie</a></main>`; },
     dm() {
@@ -91,9 +110,12 @@
     const p = location.pathname;
     let html;
     if (p === '/') html = views.home();
-    else if (p.startsWith('/explore')) html = views.explore();
+    else if (/^\/explore\/?$/.test(p)) html = views.explore();
+    else if (p.startsWith('/explore/search/keyword')) html = views.keyword();
+    else if (p.startsWith('/explore/search')) html = views.search();
+    else if (p.startsWith('/explore/')) html = views.tag();
     else if (/^\/reels\/?$/.test(p)) html = views.reelsfeed();
-    else if (/^\/reels?\/([^/]+)/.test(p)) html = views.reel(RegExp.$1);
+    else if (/^\/(?:[^/]+\/)?reels?\/([^/]+)/.test(p)) html = views.reel(RegExp.$1);
     else if (p === '/direct/inbox/') html = views.inbox();
     else if (p.startsWith('/direct/t/')) html = views.dm();
     else html = views.other();
@@ -105,6 +127,14 @@
     for (const a of document.querySelectorAll('a[data-spa]')) {
       a.addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', a.getAttribute('href')); render(); });
     }
+    // tapping the search box on the search tab opens the search page; Enter runs a keyword search
+    const box = document.getElementById('searchbox');
+    if (box && location.pathname === '/explore/') box.addEventListener('focus', () => {
+      history.pushState(null, '', '/explore/search/'); render(); document.getElementById('searchbox').focus();
+    });
+    if (box && location.pathname.startsWith('/explore/search')) box.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { history.pushState(null, '', '/explore/search/keyword/?q=' + encodeURIComponent(box.value)); render(); }
+    });
     const viewer = document.getElementById('viewer');
     if (viewer) {
       let y0 = null;

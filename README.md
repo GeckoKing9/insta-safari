@@ -1,13 +1,13 @@
 # ios-mods: Instagram Focus
 
-A Safari userscript that makes instagram.com usable on an iPhone without the attention traps: no Reels feed or tab, no Explore, no ads or suggested posts, no "open the app" prompts, the Following feed by default, and a reel someone sends you opens but cannot be swiped into the next one. Runs in Safari through the free, open-source **Userscripts** app. Nothing is installed outside the App Store; the login never leaves Safari and Meta.
+A Safari userscript that makes instagram.com usable on an iPhone without the attention traps: no Reels feed or tab, no Explore, no ads, no "Suggested for you" accounts carousel, no "open the app" prompts, and a reel someone sends you (as a page or as the DM overlay) opens, is started if Safari left it paused, but cannot be swiped into the next one. Recommended posts and the Following feed are toggles (`hideSuggestedPosts`, `followingFeed`). Runs in Safari through the free, open-source **Userscripts** app. Nothing is installed outside the App Store; the login never leaves Safari and Meta.
 
 ## Files
 
 | Path | What |
 |---|---|
 | `instagram-focus.user.js` | the script; every behaviour is a toggle in `CFG` at the top |
-| `releases/instagram-focus-v0.1.user.js` | the first version verified live on the phone (also git tag `v0.1`) |
+| `releases/instagram-focus-v0.1.user.js`, `-v0.2.user.js` | tagged releases (`v0.1` first live version; `v0.2` after the review and the screenshot-driven fixes) |
 | `sim/check.js`, `sim/app.html`, `sim/server.py` | headless-Chromium harness: 12 real-use scenarios against a model of Instagram's mobile site (`node sim/check.js`, ~30 s) |
 | `sim/device-attach.sh` | hands the iPhone from Windows to WSL (usbipd-win) and starts the device daemon cleanly |
 | `sim/pages.py` | on-device checker: is the script active in a real Safari tab (not a Home Screen web app)? |

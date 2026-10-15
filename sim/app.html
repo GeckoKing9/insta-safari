@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-itunes-app" content="app-id=389801252">
+<title>Instagram (fixture)</title>
+<style>
+  body { margin: 0; font-family: -apple-system, sans-serif; }
+  header[role="banner"] { display: flex; justify-content: space-between; padding: 8px; background: #eee; }
+  nav { display: flex; gap: 12px; padding: 8px; border-bottom: 1px solid #ccc; }
+  article { border-bottom: 1px solid #ddd; padding: 12px; }
+  .sugg { padding: 12px; background: #fafafa; }
+  .carousel { display: flex; gap: 8px; overflow-x: auto; }
+  #dmlist { height: 300px; overflow: auto; }
+  #viewer { height: 500px; overflow: auto; background: #000; color: #fff; position: relative; }
+  .slide { height: 500px; }
+  #comments { height: 150px; overflow: auto; }
+  [role="dialog"] { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 12px; border-top: 1px solid #ccc; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(() => {
+  const fr = localStorage.getItem('lang') === 'fr';
+  const T = fr ? {
+    sponsored: 'Sponsorisé', suggested: 'Suggestions pour vous', suggestedPosts: 'Publications suggérées',
+    openApp: "Ouvrir l'application", useApp: "Utiliser l'application", getApp: "Télécharger l'application",
+  } : {
+    sponsored: 'Sponsored', suggested: 'Suggested for you', suggestedPosts: 'Suggested posts',
+    openApp: 'Open app', useApp: 'Use the app', getApp: 'Get the app',
+  };
+  window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
+
+  const nav = () => `<nav>
+    <a data-spa href="/">Home</a>
+    <a data-spa href="/explore/">Explore</a>
+    <a data-spa href="/reels/">Reels</a>
+    <a data-spa href="/direct/inbox/">Messages</a>
+    <a data-spa href="/me/">Profile</a>
+  </nav>`;
+  const banner = () => `<header role="banner">
+    <span>Instagram</span>
+    <a href="instagram://app" id="openapp">${T.openApp}</a>
+  </header>`;
+  const dialog = () => `<div role="dialog" id="appdialog"><p>See more on the app</p><button>${T.useApp}</button><a href="https://apps.apple.com/app/id389801252">${T.getApp}</a></div>`;
+  const post = (id, caption, extra = '') => `<article data-id="${id}">${extra}<div><b>user_${id}</b></div><div class="caption">${caption}</div></article>`;
+
+  const views = {
+    home() {
+      const q = new URLSearchParams(location.search);
+      const variant = q.get('variant') || 'home';
+      let articles = '';
+      articles += post(1, 'Nice day at the beach');
+      articles += post(2, `${T.sponsored} ad for shoes`, `<div><span>${T.sponsored}</span></div>`);
+      articles += post(3, 'Great run today, thanks to my sponsored ride share');
+      articles += `<div class="sugg"><div><h3>${T.suggested}</h3></div><div class="carousel">
+        ${[1,2,3,4,5].map(i => `<a data-spa href="/u${i}/">user${i}</a>`).join('')}</div></div>`;
+      articles += post(4, 'My cat');
+      articles += post(5, 'Something', `<div><span>${T.suggestedPosts}</span></div>`);
+      const stress = localStorage.getItem('stress') === '1';
+      if (stress) for (let i = 10; i < 310; i++) articles += post(i, 'stress post ' + i);
+      return `${banner()}${nav()}<main><div id="variant">${variant}</div><section id="feed">${articles}</section></main>${dialog()}`;
+    },
+    explore() { return `${nav()}<main id="explore"><h2>Explore</h2></main>`; },
+    reelsfeed() { return `${nav()}<main id="reelsfeed"><h2>Reels feed</h2></main>`; },
+    inbox() { return `${nav()}<main id="inbox"><a data-spa href="/direct/t/1/">Marie</a></main>`; },
+    dm() {
+      let msgs = '';
+      for (let i = 0; i < 40; i++) msgs += `<div class="msg">message ${i}</div>`;
+      msgs += `<div class="msg"><a data-spa id="reellink" href="/reel/ABC123/">Reel from Marie</a></div>`;
+      return `${nav()}<main id="dm"><div id="dmlist">${msgs}</div></main>`;
+    },
+    reel(id) {
+      // native vertical scroller holding the current reel and the next one, like Instagram's reel feed
+      return `<main id="reel"><div id="viewer"><div class="slide"><video id="v" muted playsinline></video><div>reel ${id}</div>
+        <button id="like">Like</button></div><div class="slide">next reel</div></div><div id="comments">${'<p>comment</p>'.repeat(30)}</div></main>`;
+    },
+    other() { return `${nav()}<main id="other">page</main>`; },
+  };
+
+  const render = () => {
+    window.__renders++;
+    const p = location.pathname;
+    let html;
+    if (p === '/') html = views.home();
+    else if (p.startsWith('/explore')) html = views.explore();
+    else if (/^\/reels\/?$/.test(p)) html = views.reelsfeed();
+    else if (/^\/reels?\/([^/]+)/.test(p)) html = views.reel(RegExp.$1);
+    else if (p === '/direct/inbox/') html = views.inbox();
+    else if (p.startsWith('/direct/t/')) html = views.dm();
+    else html = views.other();
+    document.getElementById('root').innerHTML = html;
+    wire();
+  };
+
+  const wire = () => {
+    for (const a of document.querySelectorAll('a[data-spa]')) {
+      a.addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', a.getAttribute('href')); render(); });
+    }
+    const viewer = document.getElementById('viewer');
+    if (viewer) {
+      let y0 = null;
+      viewer.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; });
+      viewer.addEventListener('touchmove', (e) => {
+        if (y0 !== null && y0 - e.touches[0].clientY > 30) { y0 = null; advance(); }
+      });
+      viewer.addEventListener('wheel', (e) => { if (e.deltaY > 30) advance(); });
+      viewer.addEventListener('scroll', () => { if (viewer.scrollTop > 250) advance(); });
+      document.getElementById('like').addEventListener('click', () => { window.__liked = true; });
+      // the comments sheet records whether touch moves reach it (the lock must not swallow them)
+      window.__commentsMoveSeen = false;
+      document.getElementById('comments').addEventListener('touchmove', () => { window.__commentsMoveSeen = true; });
+    }
+    const dmlist = document.getElementById('dmlist');
+    if (dmlist) {
+      dmlist.addEventListener('touchmove', () => { window.__dmTouch = true; });
+      dmlist.addEventListener('scroll', () => { window.__dmTouch = true; });
+    }
+  };
+  const advance = () => {
+    window.__advanced = true;
+    history.pushState(null, '', '/reel/DEF456/');
+    render();
+  };
+
+  window.addEventListener('popstate', render);
+  render();
+  // Instagram sometimes rewrites the URL after load (drops the query). Simulated when strip=1.
+  if (localStorage.getItem('strip') === '1' && location.search) setTimeout(() => history.replaceState(null, '', '/'), 100);
+  // Stress: keep mutating the feed for 2 s.
+  if (localStorage.getItem('stress') === '1') {
+    let n = 0;
+    const t = setInterval(() => {
+      const el = document.querySelector('article[data-id="1"] .caption');
+      if (el) el.textContent = 'Nice day at the beach ' + (n++);
+      if (n >= 40) clearInterval(t);
+    }, 50);
+  }
+})();
+</script>
+</body>
+</html>

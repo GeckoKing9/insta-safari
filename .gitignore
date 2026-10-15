@@ -1,0 +1,5 @@
+node_modules/
+.venv/
+*.log
+*.bak-*
+sim/usbmuxd.log

@@ -28,7 +28,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '10';
+  const SITE_VERSION = '11';
 
   // At document-start the <html> element may not exist yet; wait for it instead of crashing
   const onRoot = (fn) => document.documentElement ? fn()
@@ -44,21 +44,19 @@
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
     if (CFG.hideExplore && p.startsWith('/explore')) { location.replace('/'); return; }
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
-    lockSwipe(CFG.singleReelOnly && (isReelPage(p) || reelFeedOnScreen()));
+    lockSwipe(CFG.singleReelOnly && isReelPage(p));
   };
   let last = location.href;
-  setInterval(() => {
-    if (location.href !== last) { last = location.href; route(); }
-    else if (CFG.singleReelOnly) lockSwipe(isReelPage(location.pathname) || reelFeedOnScreen());
-  }, 300);
+  setInterval(() => { if (location.href !== last) { last = location.href; route(); } }, 300);
 
-  // 2. Swipe lock. The reel feed is a scroll box (a div that scrolls, holding one reel after another);
-  // a reel opened on its own (/reel/ID) is a plain page whose caption and comments sit below the video.
-  // So the lock pins only reel scroll boxes, found by walking up from each video (a dozen nodes, never a
-  // page-wide measurement), and never the page itself. A vertical gesture is swallowed only when it
-  // starts inside a pinned box and not inside some other scrollable area in it (a comments sheet); any
-  // scroll the box still performs is undone. Taps are untouched. No layout is changed, so the player is
-  // never re-created by the lock.
+  // 2. Swipe lock, engaged by URL only (/reel/ID and /reels/ID), so nothing is measured on other pages.
+  // The reel feed is a scroll box (a div that scrolls, holding one reel after another); a reel opened on
+  // its own (/reel/ID) is a plain page whose caption and comments sit below the video. So the lock pins
+  // only reel scroll boxes, found by walking up from each video (a dozen nodes, never a page-wide
+  // measurement), and never the page itself. A vertical gesture is swallowed only when it starts inside
+  // a pinned box and not inside some other scrollable area in it (a comments sheet); any scroll the box
+  // still performs is undone. Taps are untouched. No layout is changed, so the player is never
+  // re-created by the lock.
   const stop = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
   let locked = false, startY = null, blocking = false, pinTimer = null;
   const pinned = new Map(); // reel scroll box -> scrollTop to hold it at
@@ -67,13 +65,6 @@
   const reelBoxOf = (video) => {
     for (let el = video.parentElement, i = 0; el && i < 25; el = el.parentElement, i++) if (isScrollBox(el)) return el;
     return null;
-  };
-  const reelFeedOnScreen = () => {
-    if (!document.querySelector('video')) return false; // cheap pre-check: no video, no layout reads
-    return [...document.querySelectorAll('video')].some((v) => {
-      const r = v.getBoundingClientRect();
-      return r.height >= innerHeight * 0.85 && r.width >= innerWidth * 0.6 && reelBoxOf(v) !== null;
-    });
   };
   const shouldBlock = (target) => {
     if (!(target instanceof Element)) return false;

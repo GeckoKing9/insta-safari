@@ -1,6 +1,7 @@
 # Changelog
 
-## v20 (2026-10-15, release v0.3 once checked on the phone)
+## v20 = release v0.3 (2026-10-15)
+Checked on the phone: harness ALL PASS, DEVICE PASS, and in a real DM a text message shows React / More on a finger tap while a shared post shows nothing (opens on the first tap).
 Fixes from the final review of the whole repo (69 findings; every behaviour fix has a harness scenario that failed first):
 - One tap keeps DM actions reachable: a finger's hover is blocked only when it lands on something that opens (link, button, `cursor: pointer`), so tapping a plain message bubble still shows React / Reply / More, while a shared post still opens on the first tap.
 - A friend's caption that starts with "Sponsored..." is no longer taken for an ad: the label must be the word alone or followed by a separator. Ad labels whose text arrives after the element are now seen. "Learn more" links to Instagram's or Meta's own help pages are not ad links.

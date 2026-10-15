@@ -19,13 +19,16 @@
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
+    // an ad's own call-to-action button, in case the label text differs from the list above
+    cta: ['Shop now', 'Learn more', 'Install now', 'Sign up', 'Book now', 'Get offer', 'Download', 'Order now',
+          'Acheter', 'En savoir plus', 'Installer', 'S’inscrire', "S'inscrire", 'Réserver', 'Télécharger', 'Commander'],
     partnership: ['Paid partnership', 'Partenariat rémunéré'],
     suggested: ['Suggested for you', 'Suggestions pour vous', 'Suggested posts', 'Publications suggérées', 'Suggested reels', 'Reels suggérés'],
     app: ['Open app', 'Use app', 'Use the app', 'Open Instagram', 'Get app', 'Get the app', 'Switch to the app',
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '8';
+  const SITE_VERSION = '9';
 
   // 1. Routing: Instagram is a single-page app, so this runs at start and on every URL change
   const isReelsFeed = (p) => /^\/reels\/?$/.test(p);
@@ -45,43 +48,57 @@
     else if (CFG.singleReelOnly) lockSwipe(isSingleReel(location.pathname) || fullscreenVideo());
   }, 300);
 
-  // 2. Swipe lock for reel pages. Two layers: the gesture is swallowed before Instagram sees it (touch
-  // moves, wheel, and a touch that ended >20px from where it started, i.e. a swipe rather than a tap), and
-  // the reel feed's scroll container is frozen with overflow:hidden, re-applied while the lock holds
-  // because Instagram re-renders. The container is found by walking up from the video (a dozen nodes),
-  // never by measuring the whole page. The lock also engages on content: a video covering most of the
-  // viewport is the reel viewer even when the URL did not change.
+  // 2. Swipe lock for reel pages. The reel feed's scroll container (an ancestor of the video, found by
+  // walking up a dozen nodes, never by measuring the page) is pinned: its layout is left alone, so the
+  // player is not re-created, but a vertical gesture that starts inside it is swallowed before Instagram
+  // sees it (touch moves, wheel, and a touch that ended >20px from where it started, i.e. a swipe rather
+  // than a tap), and any scroll it still performs is undone. Gestures that start inside another scrollable
+  // area, such as the comments sheet, are left alone. The lock also engages on content: a video covering
+  // most of the viewport is the reel viewer even when the URL did not change.
   const stop = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
-  let locked = false, startY = null, freezeTimer = null;
-  const onStart = (e) => { startY = e.touches[0]?.clientY ?? null; };
+  let locked = false, startY = null, blocking = false, pinTimer = null;
+  const pinned = new Map(); // reel scroll container -> scrollTop to hold it at
+  const inOtherScroller = (el) => { // nearest scrollable ancestor that is not a pinned reel container
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      if (pinned.has(n)) return false;
+      const s = getComputedStyle(n);
+      if (/auto|scroll/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 10) return true;
+    }
+    return false;
+  };
+  const onStart = (e) => {
+    startY = e.touches[0]?.clientY ?? null;
+    blocking = !(e.target instanceof Element && inOtherScroller(e.target));
+  };
+  const onMove = (e) => { if (blocking) stop(e); };
   const onEnd = (e) => {
     const y = e.changedTouches[0]?.clientY;
-    if (startY !== null && y !== undefined && Math.abs(y - startY) > 20) stop(e);
-    startY = null;
+    if (blocking && startY !== null && y !== undefined && Math.abs(y - startY) > 20) stop(e);
+    startY = null; blocking = false;
   };
-  const handlers = [['touchstart', onStart], ['touchmove', stop], ['touchend', onEnd], ['wheel', stop]];
-  const frozen = new Map(); // element -> its original inline overflow-y
-  const freeze = () => {
+  const onWheel = (e) => { if (!(e.target instanceof Element && inOtherScroller(e.target))) stop(e); };
+  const handlers = [['touchstart', onStart], ['touchmove', onMove], ['touchend', onEnd], ['touchcancel', onEnd], ['wheel', onWheel]];
+  const holdScroll = (e) => { const top = pinned.get(e.target); if (top !== undefined && e.target.scrollTop !== top) e.target.scrollTop = top; };
+  const pin = () => {
     const cands = new Set([document.scrollingElement]);
     for (const v of document.querySelectorAll('video')) {
       for (let el = v.parentElement, i = 0; el && i < 25; el = el.parentElement, i++) cands.add(el);
     }
     for (const el of cands) {
-      if (!el || frozen.has(el) || el.clientHeight < 300 || el.scrollHeight < el.clientHeight + 50) continue;
+      if (!el || pinned.has(el) || el.clientHeight < 300 || el.scrollHeight < el.clientHeight + 50) continue;
       if (el !== document.scrollingElement && !/auto|scroll/.test(getComputedStyle(el).overflowY)) continue;
-      frozen.set(el, el.style.overflowY);
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
+      pinned.set(el, el.scrollTop);
+      el.addEventListener('scroll', holdScroll, { passive: true });
     }
   };
-  const thaw = () => { for (const [el, v] of frozen) { el.style.overflowY = v; el.style.touchAction = ''; } frozen.clear(); };
+  const unpin = () => { for (const el of pinned.keys()) el.removeEventListener('scroll', holdScroll); pinned.clear(); };
   const lockSwipe = (on) => {
     if (on === locked) return;
     locked = on;
     for (const [t, h] of handlers) document[on ? 'addEventListener' : 'removeEventListener'](t, h, { capture: true, passive: false });
     document.documentElement.style.overscrollBehavior = on ? 'none' : '';
-    clearInterval(freezeTimer);
-    if (on) { freeze(); freezeTimer = setInterval(freeze, 500); } else thaw();
+    clearInterval(pinTimer);
+    if (on) { pin(); pinTimer = setInterval(pin, 500); } else unpin();
   };
   const fullscreenVideo = () => [...document.querySelectorAll('video')].some((v) => {
     const r = v.getBoundingClientRect();
@@ -127,6 +144,7 @@
     const t = el.textContent.trim();
     if (!t || t.length > 40) return;
     if (sponsoredWords.some((w) => t.startsWith(w))) hide(blockOf(el)); // "Sponsored · 2h"
+    else if (CFG.hideSponsored && WORDS.cta.includes(t) && el.closest('article') && el.closest('a, button, [role="button"]')) hide(el.closest('article'));
     else if (CFG.hideSuggested && WORDS.suggested.includes(t)) hide(blockOf(el));
     else if (CFG.hideAppPrompts && WORDS.app.includes(t)) {
       hide(el.closest('[role="dialog"], [role="banner"], header') || el.closest('button, a, [role="button"]') || el);

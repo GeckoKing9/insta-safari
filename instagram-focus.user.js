@@ -28,7 +28,31 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '11';
+  const SITE_VERSION = '12';
+  const DEBUG = true; // status strip at the bottom + event log in <html data-focus-log>; set false once the bugs are gone
+
+  // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
+  const logs = [];
+  let strip = null, hiddenCount = 0;
+  const describe = (el) => {
+    if (!(el instanceof Element)) return String(el && el.nodeName);
+    const a = el.closest('a[href]'); const b = el.closest('button, [role="button"]');
+    return [el.tagName.toLowerCase(), el.getAttribute('aria-label') || el.getAttribute('role') || '',
+      a ? 'a:' + a.getAttribute('href').slice(0, 28) : '', b ? 'btn:' + (b.getAttribute('aria-label') || b.textContent.trim()).slice(0, 18) : '',
+      el.closest('article') ? 'in-article' : '', el.closest('video') || el.querySelector?.('video') ? 'video' : ''].filter(Boolean).join(' ');
+  };
+  const log = (kind, detail) => {
+    if (!DEBUG) return;
+    const line = `${new Date().toTimeString().slice(3, 8)} ${kind} ${detail}`;
+    logs.push(line); if (logs.length > 40) logs.shift();
+    if (document.documentElement) document.documentElement.dataset.focusLog = JSON.stringify(logs);
+    if (!strip && document.body) {
+      strip = document.createElement('div');
+      strip.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.75);color:#9f9;font:10px/1.3 -apple-system,monospace;padding:2px 6px;pointer-events:none;white-space:pre-wrap;word-break:break-all';
+      document.body.appendChild(strip);
+    }
+    if (strip) strip.textContent = `v${SITE_VERSION} ${locked ? 'LOCK' : 'free'} hidden:${hiddenCount} ${location.pathname.slice(0, 24)}\n` + logs.slice(-3).join('\n');
+  };
 
   // At document-start the <html> element may not exist yet; wait for it instead of crashing
   const onRoot = (fn) => document.documentElement ? fn()
@@ -45,6 +69,7 @@
     if (CFG.hideExplore && p.startsWith('/explore')) { location.replace('/'); return; }
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
     lockSwipe(CFG.singleReelOnly && isReelPage(p));
+    log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
   setInterval(() => { if (location.href !== last) { last = location.href; route(); } }, 300);
@@ -79,7 +104,9 @@
   const onMove = (e) => { if (blocking) stop(e); };
   const onEnd = (e) => {
     const y = e.changedTouches[0]?.clientY;
-    if (blocking && startY !== null && y !== undefined && Math.abs(y - startY) > 20) stop(e);
+    const swipe = blocking && startY !== null && y !== undefined && Math.abs(y - startY) > 20;
+    if (swipe) stop(e);
+    log('touchend', (swipe ? 'SWALLOWED(swipe) ' : blocking ? 'tap-in-reel ' : 'tap ') + describe(e.target));
     startY = null; blocking = false;
   };
   const onWheel = (e) => { if (shouldBlock(e.target)) stop(e); };
@@ -96,6 +123,7 @@
   const lockSwipe = (on) => {
     if (on === locked) return;
     locked = on;
+    log('lock', on ? 'ON' : 'off');
     for (const [t, h] of handlers) document[on ? 'addEventListener' : 'removeEventListener'](t, h, { capture: true, passive: false });
     clearInterval(pinTimer);
     if (on) { pin(); pinTimer = setInterval(pin, 500); } else unpin();
@@ -121,7 +149,11 @@
   // holding no post is hidden; anywhere else a stray label hides nothing, so a page can never go blank.
   const LEAF = 'span, h2, h3, h4, div, button, a';
   const sponsoredWords = [...(CFG.hideSponsored ? WORDS.sponsored : []), ...(CFG.hidePaidPartnership ? WORDS.partnership : [])];
-  const hide = (node) => { if (node && node !== document.body && node !== document.documentElement) node.style.display = 'none'; };
+  const hide = (node, why) => {
+    if (!node || node === document.body || node === document.documentElement || node.style.display === 'none') return;
+    node.style.display = 'none'; hiddenCount++;
+    log('hide', (why || '') + ' ' + node.tagName.toLowerCase() + ' h=' + node.clientHeight);
+  };
   const carouselOf = (el) => {
     if (location.pathname !== '/') return null;
     let node = el, best = el;
@@ -137,11 +169,11 @@
     const t = el.textContent.trim();
     if (!t || t.length > 40) return;
     const post = el.closest('article');
-    if (sponsoredWords.some((w) => t.startsWith(w))) hide(post); // "Sponsored · 2h"
-    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && el.closest('a, button, [role="button"]')) hide(post);
-    else if (CFG.hideSuggested && WORDS.suggested.includes(t)) hide(post || carouselOf(el));
+    if (sponsoredWords.some((w) => t.startsWith(w))) hide(post, 'ad:' + t.slice(0, 12)); // "Sponsored · 2h"
+    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && el.closest('a, button, [role="button"]')) hide(post, 'cta:' + t.slice(0, 12));
+    else if (CFG.hideSuggested && WORDS.suggested.includes(t)) hide(post || carouselOf(el), 'suggested');
     // a dialog whose button says "Use the app" is the app prompt itself; in the header only the button goes
-    else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el);
+    else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el, 'app-prompt');
   };
   const scan = (root) => {
     if (root.nodeType !== 1) return;
@@ -160,11 +192,13 @@
         if (n.nodeType !== 1) continue;
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
-        pending.add(n);
+        scan(n); // right away: a post hidden before the feed measures it never makes the feed jump
       }
     }
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
+  // every tap, logged when debugging (capture phase, so it is seen even if Instagram stops propagation)
+  if (DEBUG) onRoot(() => document.addEventListener('click', (e) => log('click', describe(e.target)), true));
   onRoot(() => new MutationObserver(onMutations).observe(document.documentElement,
     { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['name'] }));
   const initial = () => { scan(document.documentElement); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(); };

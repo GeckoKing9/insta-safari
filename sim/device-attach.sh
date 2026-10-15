@@ -18,7 +18,7 @@ pgrep -a usbmuxd | grep -q -- '-f -v' && sudo pkill -f 'usbmuxd -f -v' 2>/dev/nu
 powershell.exe -NoProfile -Command "usbipd detach --busid $B" >/dev/null 2>&1; sleep 2
 powershell.exe -NoProfile -Command "usbipd attach --wsl --busid $B" 2>&1 | tr -d '\r' | grep -i error
 systemctl is-active --quiet usbmuxd.service || sudo systemctl start usbmuxd.service
-for i in $(seq 1 12); do sleep 2; timeout 10 "$PMD" usbmux list 2>/dev/null | grep -q ProductVersion && break; done
+for _ in $(seq 1 12); do sleep 2; timeout 10 "$PMD" usbmux list 2>/dev/null | grep -q ProductVersion && break; done
 if timeout 10 "$PMD" usbmux list 2>/dev/null | grep -q ProductVersion; then
   echo "attached (bus $B), iOS $("$PMD" lockdown info 2>/dev/null | grep -oE '"ProductVersion": "[^"]+"' | cut -d'"' -f4)"
 else

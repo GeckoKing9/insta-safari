@@ -16,6 +16,7 @@ TABS = r"""JSON.stringify([...document.querySelectorAll('a[href]')].filter((a) =
   const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && a.contains(hit); })
   .map((a) => { const r = a.getBoundingClientRect(); return { href: a.getAttribute('href'), cx: r.x + r.width / 2, top: r.top, current: a.getAttribute('aria-current') }; })
   .sort((a, b) => a.cx - b.cx).concat([{ w: innerWidth, url: location.pathname, doc: window.__focusDoc }]))"""
+RESEED = "window.__focusDoc = Math.random()"
 GO = """(() => { history.pushState(null, '', '%s'); dispatchEvent(new PopStateEvent('popstate', { state: null })); return 'ok'; })()"""
 TAP_TAB = """(() => { const a = [...document.querySelectorAll('a[href="%s"]')].find((e) => e.getBoundingClientRect().top >= innerHeight - 60); if (!a) return 'none'; a.click(); return 'tapped'; })()"""
 STATE = r"""JSON.stringify({ url: location.pathname, doc: window.__focusDoc, v: document.documentElement.dataset.focusVersion,
@@ -59,7 +60,7 @@ async def main():
         pages = await instagram_pages(insp)
         if not pages: print("FAIL setup: no Instagram tab open in Safari"); sys.exit(1)
         s = await session(insp, pages[0])
-        await ev(s, "window.__focusDoc = window.__focusDoc || Math.random(); 'ok'")
+        await ev(s, "window.__focusDoc = window.__focusDoc || Math.random(); 'ok'")  # lost on a reload, kept by in-page moves
         await ev(s, GO % "/"); await asyncio.sleep(4)
         st = await ev(s, STATE)
         if st.get("v") != WANT_VERSION: fail("version", f"phone runs v{st.get('v')}, repo is v{WANT_VERSION} (push + reload first)")
@@ -73,7 +74,7 @@ async def main():
         print("tap search tab:", await ev(s, TAP_TAB % "/explore/"), flush=True); await asyncio.sleep(3)
         st = await ev(s, STATE)
         if st.get("url") != "/explore/search/": fail("S3", f"search tab landed on {st.get('url')}")
-        if st.get("doc") != doc: fail("S3", "search tab reloaded the page")
+        if st.get("doc") != doc: fail("S3", "search tab reloaded the page"); doc = await ev(s, RESEED)
         if not st.get("inputs"): fail("S3", "no search box on the search page")
         if st.get("tiles"): fail("S3", f"{st.get('tiles')} grid tiles visible on the search page")
         check_tabs("S19 search", *(await tabs(s)), profile)
@@ -100,7 +101,8 @@ async def main():
             print(f"tap {tab} on inbox:", await ev(s, TAP_TAB % tab), flush=True); await asyncio.sleep(4)
             st = await ev(s, STATE)
             if st.get("url") != dest: fail("S20", f"inbox {tab} tab went to {st.get('url')}, expected {dest}")
-            if st.get("doc") != doc: fail("S20", f"inbox {tab} tab reloaded the page"); doc = st.get("doc")
+            if st.get("doc") != doc:  # re-mark the reloaded page, or every later reload would compare None == None
+                fail("S20", f"inbox {tab} tab reloaded the page"); doc = await ev(s, RESEED)
             check_tabs(f"S20 after {tab}", *(await tabs(s)), profile)
 
         # a DM thread keeps no tab bar over the composer

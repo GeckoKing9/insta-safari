@@ -42,7 +42,7 @@
     <div id="tabrow" style="display:flex;justify-content:space-evenly;width:100%;height:48px">${TABS.map(([h, l]) =>
       `<div><div style="display:flex"><span style="display:flex"><div style="position:relative"><a data-spa href="${h}" style="display:flex;width:48px;height:48px;align-items:center;justify-content:center;color:#f5f5f5"><svg aria-label="${l}" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg></a></div></span></div></div>`).join('')}</div></div>`;
   const banner = () => `<header role="banner">
-    <span>Instagram</span>
+    <a data-spa href="/" id="logo">Instagram</a>
     <a href="instagram://app" id="openapp">${T.openApp}</a>
   </header>`;
   const dialog = () => `<div role="dialog" id="appdialog"><p>See more on the app</p><button>${T.useApp}</button><a href="https://apps.apple.com/app/id389801252">${T.getApp}</a></div>`;
@@ -58,6 +58,7 @@
       articles += post(3, 'Great run today, thanks to my sponsored ride share');
       articles += `<div class="sugg"><div><h3>${T.suggested}</h3></div><div class="carousel">
         ${[1,2,3,4,5].map(i => `<a data-spa href="/u${i}/">user${i}</a>`).join('')}</div></div>`;
+      articles += `<div class="reelsrow"><a data-spa href="/reels/">See all reels</a></div>`;
       articles += post(4, 'My cat');
       articles += post(5, 'Something', `<div><span>${T.suggestedPosts}</span></div>`);
       // an ad whose label text is unknown but whose call-to-action is an off-site link
@@ -74,9 +75,13 @@
         .map((h) => `<a data-spa href="${h}" style="display:block;width:33%;height:120px;background:#ccc">tile</a>`).join('');
       return `${nav()}<main id="explore"><input id="searchbox" type="text" placeholder="Search"><div id="exploregrid" style="display:flex;flex-wrap:wrap">${tiles}</div></main>`;
     },
+    // the search page: a header layer (z-index 11, measured on the phone) holding the box, Cancel and a results
+    // list that runs down over the tab bar; Cancel pushes /explore/
     search() {
-      return `${nav()}<main id="search"><input id="searchbox" type="text" placeholder="Search"><div id="results">
-        <a data-spa id="acclink" href="/catlover/">catlover</a> <a data-spa id="taglink" href="/explore/tags/cats/">#cats</a></div></main>`;
+      const recents = Array.from({ length: 14 }, (_, i) => `<a data-spa href="/explore/search/keyword/?q=r${i}" style="display:block;height:60px">recent ${i}</a>`).join('');
+      return `${nav()}<main id="search"><nav style="position:relative;z-index:11;height:69px;background:#0c1014"><input id="searchbox" type="text" placeholder="Search">
+        <a data-spa id="cancel" href="/explore/">Cancel</a><div id="results">
+        <a data-spa id="acclink" href="/catlover/">catlover</a> <a data-spa id="taglink" href="/explore/tags/cats/">#cats</a>${recents}</div></nav></main>`;
     },
     // results of a keyword search and of a hashtag: grids the user asked for, which must stay visible
     keyword() {
@@ -94,7 +99,7 @@
       let rows = '';
       for (let i = 0; i < 30; i++) rows += `<div role="button" class="row" style="height:72px">chat ${i}</div>`;
       return `<main id="inbox"><div style="height:60px"><div role="button" aria-label="Back" id="back">&lt;</div>
-        <div role="button" id="acct"><span>me</span><svg aria-label="Down chevron icon" width="12" height="12"></svg></div></div>
+        <div role="button" id="acct"><span>me</span><svg aria-label="${fr ? 'Icône de chevron vers le bas' : 'Down chevron icon'}" width="12" height="12"></svg></div></div>
         <div id="inboxlist" style="position:absolute;top:60px;bottom:0;left:0;right:0;overflow:auto">
         <a data-spa id="marie" href="/direct/t/1/">Marie</a>${rows}<div role="button" class="row" id="lastrow" style="height:72px">oldest chat</div></div></main>`;
     },

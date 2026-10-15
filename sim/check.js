@@ -120,8 +120,11 @@ async function main() {
       if (new URL(page.url()).pathname !== '/explore/search/') fail('S3', `search tab did not land on the search page, url=${page.url()}`);
       if (!(await sameDoc(page, doc))) fail('S3', 'opening the search tab reloaded the page');
       if (!(await visible(page, '#searchbox'))) fail('S3', 'search box hidden on the search tab');
+      // Cancel on the search page: stays on the (cleared) search page without stacking a history step
+      await tapOr(page, '#cancel', 'S3'); await sleep(700);
+      if (new URL(page.url()).pathname !== '/explore/search/') fail('S3', `Cancel left the search page for ${page.url()}`);
       await page.goBack(); await sleep(600);
-      if (new URL(page.url()).pathname !== '/') fail('S3', `Back from the search page did not go home, url=${page.url()}`);
+      if (new URL(page.url()).pathname !== '/') fail('S3', `Back from the search page did not go home in one step, url=${page.url()}`);
       await page.goto(BASE + '/explore/'); await sleep(900);
       if (new URL(page.url()).pathname !== '/explore/search/') fail('S3', `a cold load of /explore/ did not land on the search page, url=${page.url()}`);
       await ctx.close();
@@ -176,6 +179,7 @@ async function main() {
       await page.goto(BASE + '/explore/tags/cats/'); await sleep(900);
       if (new URL(page.url()).pathname !== '/explore/tags/cats/') fail('S16', `hashtag page redirected, url=${page.url()}`);
       if (!(await visible(page, '#taggrid a'))) fail('S16', 'hashtag results grid hidden');
+      if (await page.evaluate(() => document.documentElement.hasAttribute('data-focus-search'))) fail('S16', 'tab bar lifted over sheets on a hashtag page');
       await ctx.close();
     }
     // S18 hideSearch: true is the v15 behaviour: no search tab link, /explore/ pages redirect home
@@ -183,6 +187,17 @@ async function main() {
       const { ctx, page } = await newPage(browser, { cfg: { 'hideSearch: false,': 'hideSearch: true,' } });
       await page.goto(BASE + '/'); await sleep(600);
       if (await visible(page, 'a[href="/explore/"]')) fail('S18', 'search tab link visible with hideSearch on');
+      const three = async (where) => {
+        const tabs = await bottomTabs(page), c = tabs.map((x) => x.cx), w = tabs[0]?.w;
+        if (tabs.map((x) => x.href).join(',') !== '/,/direct/inbox/,/me/') { fail('S18', `${where}: tabs ${tabs.map((x) => x.href)}`); return; }
+        if (Math.abs((c[1] - c[0]) - (c[2] - c[1])) > 1 || Math.abs(c[0] - (w - c[2])) > 1) fail('S18', `${where}: 3 tabs not symmetric ${c.map(Math.round)}`);
+      };
+      await three('home');
+      const doc = await page.evaluate(() => window.__doc);
+      await tapOr(page, '#tabbar a[href="/direct/inbox/"]', 'S18'); await sleep(600);
+      await three('inbox');
+      await page.evaluate(() => [...document.querySelectorAll('a[href="/"]')].find((e) => e.getBoundingClientRect().top >= innerHeight - 60)?.click()); await sleep(2600);
+      if (new URL(page.url()).pathname !== '/' || !(await sameDoc(page, doc))) fail('S18', `inbox Home tab with hideSearch: url ${page.url()}, reloaded=${!(await sameDoc(page, doc))}`);
       for (const p of ['/explore/', '/explore/tags/cats/']) {
         await page.goto(BASE + p); await sleep(900);
         if (new URL(page.url()).pathname !== '/') fail('S18', `${p} not redirected with hideSearch on, url=${page.url()}`);
@@ -203,6 +218,8 @@ async function main() {
       await page.goto(BASE + '/'); await sleep(700);
       const doc = await page.evaluate(() => window.__doc);
       const home = await checkTabs(page, 'S20', 'home');
+      const learned = await page.evaluate(() => ({ s: localStorage.getItem('focusTabs'), bar: document.getElementById('tabbar').hasAttribute('data-focus-bar') }));
+      if (!learned.bar || !String(learned.s).includes('"/me/"')) fail('S20', `tab bar not learned from the bottom bar (header logo links to / first): ${JSON.stringify(learned)}`);
       for (const [tab, dest] of [['/explore/', '/explore/search/'], ['/', '/'], ['/me/', '/me/']]) {
         await tapOr(page, '#tabbar a[href="/direct/inbox/"]', 'S20'); await sleep(600);
         if (new URL(page.url()).pathname !== '/direct/inbox/') { fail('S20', `Messages tab did not open the inbox, url=${page.url()}`); break; }
@@ -233,6 +250,24 @@ async function main() {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/direct/inbox/'); await sleep(900);
       await checkTabs(page, 'S21', 'cold inbox');
+      await ctx.close();
+    }
+    // S21b the same cold inbox in French: the Profile tab still finds the account
+    {
+      const { ctx, page } = await newPage(browser, { storage: { lang: 'fr' } });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      await checkTabs(page, 'S21b', 'cold inbox (fr)');
+      await ctx.close();
+    }
+    // S21c colours are remembered per colour scheme: dark ones learned on home never paint a light-mode inbox
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.goto(BASE + '/'); await sleep(600);
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      const bg = await page.evaluate(() => { const b = document.getElementById('focus-tabbar'); return b && getComputedStyle(b).backgroundColor; });
+      if (bg !== 'rgb(255, 255, 255)') fail('S21c', `light-mode inbox bar background is ${bg}, expected the light default`);
       await ctx.close();
     }
     // S22 a double tap never zooms the page: touch-action manipulation on the page and on links

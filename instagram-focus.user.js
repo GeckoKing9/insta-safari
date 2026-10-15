@@ -19,6 +19,7 @@
     hideSuggestedPosts: false,  // recommended posts in the home feed (the feed is mostly these once you're caught up)
     followingFeed: false,       // open the Following feed instead of Home
     hideAppPrompts: true,       // "Open in app" banners, App Store links, Safari's Smart App Banner
+    inboxTabBar: true,          // the four tabs stay at the bottom of the DM inbox (Instagram shows none there)
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
@@ -31,7 +32,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '16';
+  const SITE_VERSION = '17';
   const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -67,14 +68,26 @@
   const isReelPage = (p) => /^\/(?:[^/]+\/)?reels?\/(?!audio\/)[^/]+/.test(p);
   // The Following-feed switch runs on the initial load only: Instagram may rewrite the URL afterwards
   // (dropping the query), and re-applying it from the watcher would reload the page forever.
+  let lastPath = null;
   const route = (firstLoad = false) => {
-    const p = location.pathname;
+    const p = location.pathname, from = lastPath;
+    lastPath = p;
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
     if (CFG.hideSearch && p.startsWith('/explore')) { location.replace('/'); return; }
-    // the search tab itself (/explore/): the CSS hides its recommended grid; results pages are deeper paths
-    document.documentElement?.toggleAttribute('data-focus-explore', CFG.hideExplore && /^\/explore\/?$/.test(p));
+    // The search tab (/explore/) is a search box over the recommended grid. With the grid hidden it is a blank
+    // page whose box only opens the real search page, so the tab goes straight there: one tap to the keyboard.
+    // The CSS keeps tiles hidden on both paths, for the moment before the search page replaces Explore.
+    document.documentElement?.toggleAttribute('data-focus-explore', CFG.hideExplore && /^\/explore\/(search\/)?$/.test(p));
+    document.documentElement?.toggleAttribute('data-focus-search', p.startsWith('/explore/search'));
+    if (CFG.hideExplore && /^\/explore\/?$/.test(p)) {
+      // Cancel on the search page pushes /explore/: step back to that search page instead of stacking a copy of it
+      if (from === '/explore/search/') history.back();
+      else spaGo('/explore/search/', () => [...document.querySelectorAll(TILES)].filter((t) => t.getClientRects().length).length < 6, true);
+      return;
+    }
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
     recheckLock();
+    syncTabs();
     log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
@@ -180,11 +193,18 @@
   };
 
   // 3. Links: matched by href, so Instagram's class-name churn doesn't break them
+  const TILES = ['/p/', '/reel/', '/reels/', '/tv/'].map((h) => `a[href*="${h}"]:not([href="/reels/"])`).join(','); // post and reel tiles
   const css = [];
   if (CFG.hideReelsFeed) css.push('a[href="/reels/"]{display:none!important}'); // exact: single-reel links stay
   if (CFG.hideSearch) css.push('a[href^="/explore"]{display:none!important}');
   // visibility, not display: the tiles keep their space, so Instagram's grid never looks empty and keeps loading more
-  if (CFG.hideExplore) css.push(['/p/', '/reel/', '/reels/', '/tv/'].map((h) => `html[data-focus-explore] a[href*="${h}"]:not([href="/reels/"])`).join(',') + '{visibility:hidden!important}');
+  if (CFG.hideExplore) css.push(TILES.split(',').map((t) => `html[data-focus-explore] ${t}`).join(',') + '{visibility:hidden!important}');
+  css.push('[data-focus-hidden]{display:none!important}', '[data-focus-pad]{padding-bottom:50px!important}',
+    '#focus-tabbar a[aria-current] [stroke-width]{stroke-width:3}',
+    // on the search pages Instagram's results list is a layer (z-index 11) that runs over its own tab bar (2), so a
+    // tap on Home opened a recent search; the bar goes above it there (only there: elsewhere sheets must cover it)
+    'html[data-focus-search] [data-focus-bar]{z-index:12!important}');
+  css.push('*{touch-action:manipulation}'); // no double-tap zoom anywhere; Instagram's own touch-action rules still win
   if (CFG.hideAppPrompts) css.push('a[href^="instagram://"],a[href*="apps.apple.com"],a[href^="itms-apps"]{display:none!important}');
   onRoot(() => {
     const style = document.createElement('style');
@@ -193,7 +213,137 @@
     document.documentElement.dataset.focusVersion = SITE_VERSION;
   });
 
-  // 4. Content: labels matched by exact visible text (EN + FR). Only nodes Instagram adds are examined
+  // 4. Tab bar. Instagram's bottom bar is a space-evenly row of five slots. Hiding a link (Reels) left its empty
+  // slot in the row, still spaced for (centres measured 87/128/87 px apart), so the slot itself is hidden and the
+  // tabs space evenly. The DM inbox has no bar at all; the same tabs are drawn there with Instagram's own icons
+  // (paths measured 2026-10-15) at the same place, and switch pages in place like Instagram's do.
+  // Instagram renders a route when it sees a popstate (verified on the phone), so a page opens without a reload;
+  // if it has not rendered 2 s later, the page is loaded normally.
+  const spaGo = (path, rendered, replace = false) => {
+    history[replace ? 'replaceState' : 'pushState'](null, '', path);
+    dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    setTimeout(() => { if (location.pathname + location.search === path && !rendered()) location.replace(path); }, 2000);
+  };
+  const isInbox = (p) => /^\/direct\/inbox\/?$/.test(p);
+  // a tab link of Instagram's own bar: shown, along the bottom edge (a header logo also links to /)
+  const nativeTab = (href) => [...document.querySelectorAll(`a[href="${href}"]:not([data-focus-tab])`)]
+    .find((a) => { const r = a.getBoundingClientRect(); return r.height > 0 && r.top > innerHeight - 100; });
+  const barUp = () => !!nativeTab('/direct/inbox/'); // Messages is in Instagram's bar on every page that has one
+  const scheme = () => (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const store = (() => { try { return JSON.parse(localStorage.getItem('focusTabs')) || {}; } catch { return {}; } })();
+  // Instagram's bar (its profile link, and its colours per colour scheme), remembered for an inbox opened cold
+  const learnBar = (home) => {
+    let row = home; while (row && !row.querySelector('a[href="/direct/inbox/"]')) row = row.parentElement;
+    let fixed = home; while (fixed && getComputedStyle(fixed).position !== 'fixed') fixed = fixed.parentElement;
+    if (!row || !fixed) return;
+    fixed.setAttribute('data-focus-bar', '');
+    const edge = [fixed, ...fixed.querySelectorAll('div')].find((e) => getComputedStyle(e).borderTopWidth !== '0px'); // its 1 px divider
+    const next = { ...store, [scheme()]: { fg: getComputedStyle(home.querySelector('svg') || home).color, bg: getComputedStyle(fixed).backgroundColor,
+      line: edge ? getComputedStyle(edge).borderTopColor : undefined } };
+    const prof = [...row.querySelectorAll('a[href]')].pop(), href = prof?.getAttribute('href');
+    if (href && /^\/[^/]+\/$/.test(href) && !['/', '/explore/', '/direct/inbox/', '/reels/'].includes(href)) {
+      next.profile = href; next.avatar = prof.querySelector('img')?.src || store.avatar;
+    }
+    if (JSON.stringify(next) === JSON.stringify(store)) return;
+    Object.assign(store, next);
+    try { localStorage.setItem('focusTabs', JSON.stringify(store)); } catch { /* private mode: remembered for this page only */ }
+  };
+  const HIDDEN_TABS = [...(CFG.hideReelsFeed ? ['a[href="/reels/"]'] : []), ...(CFG.hideSearch ? ['a[href="/explore/"]'] : [])].join(',');
+  const hideSlots = () => {
+    if (!HIDDEN_TABS) return;
+    for (const a of document.querySelectorAll(HIDDEN_TABS)) {
+      let slot = a; // the highest wrapper of the link below the row that holds the Messages tab
+      while (slot.parentElement && !slot.parentElement.querySelector('a[href="/direct/inbox/"]')) slot = slot.parentElement;
+      // a tab slot wraps just that link; a Reels link in the page content climbs to a whole column and is left alone
+      if (slot.parentElement && slot.querySelectorAll('a[href]').length === 1) slot.setAttribute('data-focus-hidden', '');
+    }
+  };
+  const SVG = 'http://www.w3.org/2000/svg';
+  const LINE = { fill: 'none', stroke: 'currentColor', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2' };
+  const ICONS = {
+    '/': [['path', { d: 'm21.762 8.786-7-6.68C13.266.68 10.734.68 9.238 2.106l-7 6.681A4.017 4.017 0 0 0 1 11.68V20c0 1.654 1.346 3 3 3h5.005a1 1 0 0 0 1-1L10 15c0-1.103.897-2 2-2 1.09 0 1.98.877 2 1.962L13.999 22a1 1 0 0 0 1 1H20c1.654 0 3-1.346 3-3v-8.32a4.021 4.021 0 0 0-1.238-2.894ZM21 20a1 1 0 0 1-1 1h-4.001L16 15c0-2.206-1.794-4-4-4s-4 1.794-4 4l.005 6H4a1 1 0 0 1-1-1v-8.32c0-.543.226-1.07.62-1.447l7-6.68c.747-.714 2.013-.714 2.76 0l7 6.68c.394.376.62.904.62 1.448V20Z' }]],
+    '/explore/': [['path', { d: 'M19 10.5A8.5 8.5 0 1 1 10.5 2a8.5 8.5 0 0 1 8.5 8.5Z', ...LINE }], ['line', { x1: '16.511', x2: '22', y1: '16.511', y2: '22', ...LINE }]],
+    '/direct/inbox/': [['path', { d: 'M13.973 20.046 21.77 6.928C22.8 5.195 21.55 3 19.535 3H4.466C2.138 3 .984 5.825 2.646 7.456l4.842 4.752 1.723 7.121c.548 2.266 3.571 2.721 4.762.717Z', ...LINE }],
+      ['line', { x1: '7.488', x2: '15.515', y1: '12.208', y2: '7.641', ...LINE }]],
+    profile: [['circle', { cx: '12', cy: '12', r: '10.5', ...LINE }]], // when no profile picture is known
+  };
+  const icon = (parts, label) => {
+    const svg = document.createElementNS(SVG, 'svg');
+    for (const [k, v] of Object.entries({ 'aria-label': label, fill: 'currentColor', height: '24', width: '24', viewBox: '0 0 24 24', role: 'img' })) svg.setAttribute(k, v);
+    for (const [tag, attrs] of parts) { const el = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); svg.append(el); }
+    return svg;
+  };
+  let bar = null, profileWanted = false;
+  const goTab = (a) => {
+    const href = a.getAttribute('href');
+    // profile still unknown: open Home, whose bar has the profile link, and go on from there (syncTabs)
+    if (a.hasAttribute('data-focus-unknown')) { profileWanted = true; spaGo('/', barUp); return; }
+    const dest = href === '/explore/' && CFG.hideExplore ? '/explore/search/' : href;
+    if (location.pathname !== dest) spaGo(dest, barUp);
+  };
+  // the account name the inbox shows at the top (next to a chevron icon), for when Instagram's bar was never seen
+  const accountHref = () => {
+    const name = [...document.querySelectorAll('[role="button"]')].find((b) => b.querySelector('svg[aria-label*="chevron" i]'))?.textContent.trim();
+    return name && /^[\w.]+$/.test(name) ? `/${name}/` : null;
+  };
+  const buildBar = () => {
+    const dark = scheme() === 'dark', c = store[scheme()] || {};
+    const fg = c.fg || (dark ? 'rgb(245, 245, 245)' : 'rgb(0, 0, 0)'), bg = c.bg || (dark ? 'rgb(12, 16, 20)' : 'rgb(255, 255, 255)');
+    const line = c.line || (dark ? 'rgb(54, 54, 54)' : 'rgb(219, 219, 219)');
+    const el = document.createElement('div');
+    el.id = 'focus-tabbar';
+    el.style.cssText = `position:fixed;left:0;right:0;bottom:0;height:50px;border-top:1px solid ${line};box-sizing:border-box;z-index:2;background:${bg}`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-evenly;width:100%;height:48px';
+    const tabs = [['/', 'Home'], ...(CFG.hideSearch ? [] : [['/explore/', 'Search']]), ['/direct/inbox/', 'Messages'], [store.profile || '/', 'Profile']];
+    for (const [href, label] of tabs) {
+      const a = document.createElement('a');
+      a.href = href; a.setAttribute('data-focus-tab', ''); a.setAttribute('aria-label', label);
+      a.style.cssText = `display:flex;width:48px;height:48px;align-items:center;justify-content:center;color:${fg};-webkit-tap-highlight-color:transparent`;
+      if (href === '/direct/inbox/') a.setAttribute('aria-current', 'page');
+      if (label === 'Profile' && !store.profile) a.setAttribute('data-focus-unknown', '');
+      if (label === 'Profile' && store.profile && store.avatar) {
+        const img = document.createElement('img');
+        img.src = store.avatar; img.alt = ''; img.style.cssText = 'width:24px;height:24px;border-radius:50%;object-fit:cover';
+        img.addEventListener('error', () => img.replaceWith(icon(ICONS.profile, label)), { once: true });
+        a.append(img);
+      } else a.append(icon(ICONS[href] && label !== 'Profile' ? ICONS[href] : ICONS.profile, label));
+      a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); goTab(a); });
+      row.append(a);
+    }
+    el.append(row);
+    el.tries = 0;
+    return el;
+  };
+  // the inbox list scrolls inside its own box down to the bottom edge: pad that box so the last chat clears the bar
+  const padInbox = () => {
+    if (document.querySelector('[data-focus-pad]')) return;
+    const under = document.elementsFromPoint(innerWidth / 2, innerHeight - 25).find((e) => !bar.contains(e));
+    for (let el = under, i = 0; el && el !== document.body && i < 25; el = el.parentElement, i++) {
+      if (/auto|scroll/.test(getComputedStyle(el).overflowY) && el.clientHeight >= 200) { el.setAttribute('data-focus-pad', ''); return; }
+    }
+  };
+  const inboxPending = () => bar?.isConnected && bar.tries < 60 && (!document.querySelector('[data-focus-pad]') || bar.querySelector('[data-focus-unknown]'));
+  const syncTabs = () => {
+    if (!document.body) return;
+    hideSlots();
+    const home = nativeTab('/');
+    if (home && barUp()) learnBar(home);
+    if (profileWanted && store.profile && barUp()) { profileWanted = false; spaGo(store.profile, barUp); }
+    const want = CFG.inboxTabBar && isInbox(location.pathname) && !barUp();
+    if (want && !bar?.isConnected) document.body.append(bar = buildBar());
+    if (!want && bar?.isConnected) { bar.remove(); for (const e of document.querySelectorAll('[data-focus-pad]')) e.removeAttribute('data-focus-pad'); }
+    if (!want || !inboxPending()) return;
+    // the inbox renders after the bar may be up: its list box and account name are picked up as they appear
+    bar.tries++;
+    padInbox();
+    const unknown = bar.querySelector('[data-focus-unknown]'), href = unknown && accountHref();
+    if (href) { unknown.setAttribute('href', href); unknown.removeAttribute('data-focus-unknown'); }
+  };
+  const TAB_LINKS = 'a[href="/"], a[href="/reels/"], a[href="/explore/"], a[href="/direct/inbox/"]';
+  const touchesTabs = (n) => n.nodeType === 1 && !n.closest?.('#focus-tabbar') && (n.matches(TAB_LINKS) || !!n.querySelector(TAB_LINKS) || !!n.closest?.(TAB_LINKS));
+
+  // 5. Content: labels matched by exact visible text (EN + FR). Only nodes Instagram adds are examined
   // (incremental, via the mutation records), never the whole page again, and only leaf elements are read:
   // on Instagram every wrapper div has a single child, so reading text on wrappers would re-read the
   // whole page hundreds of times. A label hides its post (closest <article>). "Suggested for you" inside a
@@ -244,6 +394,7 @@
   const flush = () => { flushTimer = null; for (const n of pending) scan(n); pending.clear(); };
   const onMutations = (muts) => {
     routeIfMoved();
+    let tabsChanged = false;
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }
@@ -253,12 +404,18 @@
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
         scan(n); // right away: a post hidden before the feed measures it never makes the feed jump
+        if (!tabsChanged && touchesTabs(n)) tabsChanged = true;
         const vids = n.tagName === 'VIDEO' ? [n] : [...n.querySelectorAll('video')];
         if (vids.length) { videoChange = true; for (const v of vids) nudgePlay(v); }
       }
-      for (const n of m.removedNodes) if (n.nodeType === 1 && (n.tagName === 'VIDEO' || n.querySelector?.('video'))) videoChange = true;
+      for (const n of m.removedNodes) {
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === 'VIDEO' || n.querySelector?.('video')) videoChange = true;
+        if (!tabsChanged && touchesTabs(n)) tabsChanged = true; // Instagram's bar going away (the inbox)
+      }
       if (videoChange) recheckLock();
     }
+    if (tabsChanged || inboxPending()) syncTabs();
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
   // every tap, logged when debugging (capture phase, so it is seen even if Instagram stops propagation)

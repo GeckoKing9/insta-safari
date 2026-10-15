@@ -8,7 +8,6 @@
 <style>
   body { margin: 0; font-family: -apple-system, sans-serif; }
   header[role="banner"] { display: flex; justify-content: space-between; padding: 8px; background: #eee; }
-  nav { display: flex; gap: 12px; padding: 8px; border-bottom: 1px solid #ccc; }
   article { border-bottom: 1px solid #ddd; padding: 12px; }
   .sugg { padding: 12px; background: #fafafa; }
   .carousel { display: flex; gap: 8px; overflow-x: auto; }
@@ -33,14 +32,15 @@
     openApp: 'Open app', useApp: 'Use the app', getApp: 'Get the app',
   };
   window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
+  window.__doc = Math.random(); // survives in-page navigation, lost on a full reload
 
-  const nav = () => `<nav>
-    <a data-spa href="/">Home</a>
-    <a data-spa href="/explore/">Explore</a>
-    <a data-spa href="/reels/">Reels</a>
-    <a data-spa href="/direct/inbox/">Messages</a>
-    <a data-spa href="/me/">Profile</a>
-  </nav>`;
+  // The bottom tab bar as Instagram builds it (measured on the phone 2026-10-15): a fixed 50 px bar holding a
+  // space-evenly row of 5 slots, each slot wrapping a 48 px link four levels down. Hiding only the Reels link
+  // leaves its slot in the row, and space-evenly still spaces for it.
+  const TABS = [['/', 'Home'], ['/explore/', 'Explore'], ['/reels/', 'Reels'], ['/direct/inbox/', 'Messages'], ['/me/', 'Profile']];
+  const nav = () => `<div id="tabbar" style="position:fixed;left:0;right:0;bottom:0;height:50px;background:#0c1014;z-index:2;display:flex">
+    <div id="tabrow" style="display:flex;justify-content:space-evenly;width:100%;height:48px">${TABS.map(([h, l]) =>
+      `<div><div style="display:flex"><span style="display:flex"><div style="position:relative"><a data-spa href="${h}" style="display:flex;width:48px;height:48px;align-items:center;justify-content:center;color:#f5f5f5"><svg aria-label="${l}" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg></a></div></span></div></div>`).join('')}</div></div>`;
   const banner = () => `<header role="banner">
     <span>Instagram</span>
     <a href="instagram://app" id="openapp">${T.openApp}</a>
@@ -89,13 +89,21 @@
         <a data-spa href="/someone/reel/T1/" style="display:block;width:33%;height:120px;background:#ccc">reel</a></div></main>`;
     },
     reelsfeed() { return `${nav()}<main id="reelsfeed"><h2>Reels feed</h2></main>`; },
-    inbox() { return `${nav()}<main id="inbox"><a data-spa href="/direct/t/1/">Marie</a></main>`; },
+    // the DM inbox has no tab bar: a Back arrow, the account name, then a list that scrolls inside its own box down to the bottom edge
+    inbox() {
+      let rows = '';
+      for (let i = 0; i < 30; i++) rows += `<div role="button" class="row" style="height:72px">chat ${i}</div>`;
+      return `<main id="inbox"><div style="height:60px"><div role="button" aria-label="Back" id="back">&lt;</div>
+        <div role="button" id="acct"><span>me</span><svg aria-label="Down chevron icon" width="12" height="12"></svg></div></div>
+        <div id="inboxlist" style="position:absolute;top:60px;bottom:0;left:0;right:0;overflow:auto">
+        <a data-spa id="marie" href="/direct/t/1/">Marie</a>${rows}<div role="button" class="row" id="lastrow" style="height:72px">oldest chat</div></div></main>`;
+    },
     dm() {
       let msgs = '';
       for (let i = 0; i < 40; i++) msgs += `<div class="msg">message ${i}</div>`;
       msgs += `<div class="msg"><a data-spa id="reellink" href="/reel/ABC123/">Reel from Marie</a></div>`;
       msgs += `<div class="msg"><div role="button" id="reelcard">Reel from Paul (opens as an overlay)</div></div>`;
-      return `${nav()}<main id="dm"><div id="dmlist">${msgs}</div></main>`;
+      return `<main id="dm"><div style="height:40px">Marie</div><div id="dmlist">${msgs}</div></main>`;
     },
     reel(id) {
       // native vertical scroller holding the current reel and the next one, like Instagram's reel feed
@@ -177,7 +185,8 @@
     render();
   };
 
-  window.addEventListener('popstate', render);
+  // ignorePopstate=1 models a router that ignores script-made popstate events (only real Back/Forward)
+  window.addEventListener('popstate', (e) => { if (localStorage.getItem('ignorePopstate') === '1' && !e.isTrusted) return; render(); });
   render();
   // Instagram sometimes rewrites the URL after load (drops the query). Simulated when strip=1.
   if (localStorage.getItem('strip') === '1' && location.search) setTimeout(() => history.replaceState(null, '', '/'), 100);

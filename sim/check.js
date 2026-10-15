@@ -21,6 +21,8 @@ async function newPage(browser, { script = true, storage = {}, cfg = {} } = {}) 
   for (const [from, to] of Object.entries(cfg)) { if (!src.includes(from)) throw new Error(`CFG line not found: ${from}`); src = src.replace(from, to); }
   if (script) await ctx.addInitScript(src);
   const page = await ctx.newPage();
+  // S0 sentinel: any uncaught error in the page (the script's or the fixture's) is a failure
+  page.on('pageerror', (e) => fail('S0', `page error: ${e.message.slice(0, 120)}`));
   return { ctx, page };
 }
 
@@ -45,6 +47,25 @@ const tappable = (page, sel) => page.evaluate((s) => {
   return !!hit && (hit === e || e.contains(hit));
 }, sel);
 
+// The visible links along the bottom edge (the tab bar, Instagram's or the script's), left to right
+const bottomTabs = (page) => page.evaluate(() => [...document.querySelectorAll('a[href]')]
+  .filter((a) => { const r = a.getBoundingClientRect(); if (!a.checkVisibility({ visibilityProperty: true }) || !r.width || r.top < innerHeight - 60 || r.bottom > innerHeight + 1) return false;
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && a.contains(hit); }) // on screen and not clipped or covered
+  .map((a) => { const r = a.getBoundingClientRect(); return { href: a.getAttribute('href'), cx: r.x + r.width / 2, top: r.top, w: innerWidth, current: a.getAttribute('aria-current') }; })
+  .sort((a, b) => a.cx - b.cx));
+const TAB_HREFS = '/,/explore/,/direct/inbox/,/me/';
+// exactly the 4 tabs, mirror-symmetric, equal gaps (1 px tolerance); returns the centres for comparisons
+const checkTabs = async (page, id, where) => {
+  const tabs = await bottomTabs(page);
+  const hrefs = tabs.map((t) => t.href).join(',');
+  if (hrefs !== TAB_HREFS) { fail(id, `${where}: bottom tabs are ${hrefs || 'none'}, expected ${TAB_HREFS}`); return null; }
+  const c = tabs.map((t) => t.cx), w = tabs[0].w, gaps = [c[1] - c[0], c[2] - c[1], c[3] - c[2]];
+  if (Math.max(...gaps) - Math.min(...gaps) > 1) fail(id, `${where}: tab gaps uneven ${gaps.map(Math.round).join('/')}`);
+  if (Math.abs(c[0] - (w - c[3])) > 1) fail(id, `${where}: tabs off-centre, left margin ${Math.round(c[0])} vs right ${Math.round(w - c[3])}`);
+  return c;
+};
+const sameDoc = (page, doc) => page.evaluate((d) => window.__doc === d, doc);
+
 // a tap that cannot happen (element missing or hidden) is a scenario failure, not a harness crash
 const tapOr = (page, sel, id) => page.click(sel, { timeout: 3000 }).then(() => true, () => { fail(id, `could not tap ${sel}, url=${page.url()}`); return false; });
 
@@ -63,6 +84,7 @@ async function main() {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(700);
       if (page.url().includes('variant=')) fail('S1', `Home feed expected (followingFeed is off), url=${page.url()}`);
+      if (!(await page.evaluate(() => document.documentElement.dataset.focusVersion))) fail('S0', 'script not running (no data-focus-version)');
       if (await visible(page, 'a[href="/reels/"]')) fail('S1', 'Reels nav link visible');
       if (!(await visible(page, 'a[href="/explore/"]'))) fail('S1', 'search tab link hidden (search must stay reachable)');
       if (!(await visible(page, '#feed'))) fail('S1', 'feed root hidden');
@@ -84,23 +106,49 @@ async function main() {
       if (new URL(page.url()).pathname !== '/') fail('S2', `/reels/ not redirected, url=${page.url()}`);
       await ctx.close();
     }
-    // S3 search tab, opened from the nav: it stays, the search box works, the recommended grid under it is
-    // hidden (hideExplore) and its tiles cannot be tapped
+    // S3 search tab, opened from the nav: one tap lands on the search page with its box (no blank Explore page
+    // in between, no reload, Back goes home); the recommended grid is never visible, not even for a frame
     {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(600);
+      const doc = await page.evaluate(() => window.__doc);
       await tapOr(page, 'a[href="/explore/"]', 'S3');
       // checked at once: the grid must already be hidden when Instagram renders it, not after a polling tick
       const early = await visibleCount(page, '#exploregrid a');
       if (early) fail('S3', `${early} recommended grid tiles visible right after opening the search tab`);
       await sleep(700);
-      if (new URL(page.url()).pathname !== '/explore/') fail('S3', `search tab did not stay open, url=${page.url()}`);
+      if (new URL(page.url()).pathname !== '/explore/search/') fail('S3', `search tab did not land on the search page, url=${page.url()}`);
+      if (!(await sameDoc(page, doc))) fail('S3', 'opening the search tab reloaded the page');
       if (!(await visible(page, '#searchbox'))) fail('S3', 'search box hidden on the search tab');
+      await page.goBack(); await sleep(600);
+      if (new URL(page.url()).pathname !== '/') fail('S3', `Back from the search page did not go home, url=${page.url()}`);
+      await page.goto(BASE + '/explore/'); await sleep(900);
+      if (new URL(page.url()).pathname !== '/explore/search/') fail('S3', `a cold load of /explore/ did not land on the search page, url=${page.url()}`);
+      await ctx.close();
+    }
+    // S3b a router that ignores the in-place switch: the Explore page stays on screen with its grid hidden and
+    // untappable, then the search page is loaded normally
+    {
+      const { ctx, page } = await newPage(browser, { storage: { ignorePopstate: '1' } });
+      await page.goto(BASE + '/'); await sleep(600);
+      await tapOr(page, 'a[href="/explore/"]', 'S3b'); await sleep(300);
       const shown = await visibleCount(page, '#exploregrid a');
-      if (shown) fail('S3', `${shown} recommended grid tiles visible on the search tab`);
+      if (shown) fail('S3b', `${shown} recommended grid tiles visible while the search page is not shown yet`);
       for (const href of await page.evaluate(() => [...document.querySelectorAll('#exploregrid a')].map((a) => a.getAttribute('href')))) {
-        if (await tappable(page, `#exploregrid a[href="${href}"]`)) fail('S3', `hidden grid tile ${href} can still be tapped`);
+        if (await tappable(page, `#exploregrid a[href="${href}"]`)) fail('S3b', `hidden grid tile ${href} can still be tapped`);
       }
+      await sleep(2500);
+      if (new URL(page.url()).pathname !== '/explore/search/' || !(await visible(page, '#results'))) fail('S3b', `search page not reached by the fallback, url=${page.url()}`);
+      await ctx.close();
+    }
+    // S20b same router: a tab tapped on the inbox bar falls back to a normal load of the right page
+    {
+      const { ctx, page } = await newPage(browser, { storage: { ignorePopstate: '1' } });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      const tapped = await page.evaluate(() => { const a = [...document.querySelectorAll('a[href="/me/"]')].find((e) => e.getBoundingClientRect().top >= innerHeight - 60); if (!a) return false; a.click(); return true; });
+      if (!tapped) fail('S20b', 'no Profile tab on the inbox');
+      await sleep(2500);
+      if (new URL(page.url()).pathname !== '/me/' || !(await visible(page, '#other'))) fail('S20b', `Profile tab fallback did not load the profile, url=${page.url()}`);
       await ctx.close();
     }
     // S16 searching: box -> results (accounts, hashtags) -> keyword grid; a reel opened from the results is
@@ -139,6 +187,60 @@ async function main() {
         await page.goto(BASE + p); await sleep(900);
         if (new URL(page.url()).pathname !== '/') fail('S18', `${p} not redirected with hideSearch on, url=${page.url()}`);
       }
+      await ctx.close();
+    }
+    // S19 the 4 tabs (Home, Search, Messages, Profile) sit mirror-symmetric with equal gaps wherever the bar shows
+    for (const p of ['/', '/explore/search/', '/p/X1/']) {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + p); await sleep(700);
+      await checkTabs(page, 'S19', p);
+      await ctx.close();
+    }
+    // S20 the DM inbox keeps the same tab bar: same 4 centres, Messages current, the last chat scrolls clear of it,
+    // every tab switches page in place (no reload) and leaves exactly one bar; a DM thread keeps no bar
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/'); await sleep(700);
+      const doc = await page.evaluate(() => window.__doc);
+      const home = await checkTabs(page, 'S20', 'home');
+      for (const [tab, dest] of [['/explore/', '/explore/search/'], ['/', '/'], ['/me/', '/me/']]) {
+        await tapOr(page, '#tabbar a[href="/direct/inbox/"]', 'S20'); await sleep(600);
+        if (new URL(page.url()).pathname !== '/direct/inbox/') { fail('S20', `Messages tab did not open the inbox, url=${page.url()}`); break; }
+        const inbox = await checkTabs(page, 'S20', 'inbox');
+        if (home && inbox && inbox.some((c, i) => Math.abs(c - home[i]) > 1)) fail('S20', `inbox tabs at ${inbox.map(Math.round)} vs home ${home.map(Math.round)}`);
+        const cur = (await bottomTabs(page)).filter((t) => t.current === 'page').map((t) => t.href).join(',');
+        if (cur !== '/direct/inbox/') fail('S20', `inbox: current tab is "${cur}", expected Messages`);
+        if (tab === '/explore/') {
+          const clear = await page.evaluate(() => { const l = document.getElementById('inboxlist'); l.scrollTop = l.scrollHeight;
+            const last = document.getElementById('lastrow').getBoundingClientRect(), barTop = Math.min(...[...document.querySelectorAll('a[href="/"]')].map((a) => a.getBoundingClientRect().top));
+            return last.bottom <= barTop + 1 ? true : `last chat ends at ${Math.round(last.bottom)}, bar starts at ${Math.round(barTop)}`; });
+          if (clear !== true) fail('S20', `inbox: ${clear}`);
+        }
+        const link = await page.evaluate((h) => { const a = [...document.querySelectorAll(`a[href="${h}"]`)].find((e) => e.getBoundingClientRect().top >= innerHeight - 60); if (!a) return false; a.click(); return true; }, tab);
+        if (!link) { fail('S20', `inbox: no ${tab} tab to tap`); continue; }
+        await sleep(700);
+        if (new URL(page.url()).pathname !== dest) fail('S20', `inbox ${tab} tab went to ${page.url()}, expected ${dest}`);
+        if (!(await sameDoc(page, doc))) fail('S20', `inbox ${tab} tab reloaded the page`);
+        await checkTabs(page, 'S20', `after inbox ${tab} tab`);
+      }
+      await page.evaluate(() => { history.pushState(null, '', '/direct/t/1/'); window.dispatchEvent(new PopStateEvent('popstate')); }); await sleep(600);
+      const inThread = (await bottomTabs(page)).length;
+      if (inThread) fail('S20', `DM thread shows ${inThread} tab links over the composer`);
+      await ctx.close();
+    }
+    // S21 a cold load straight into the inbox (nothing remembered yet) still gets the full, symmetric bar
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      await checkTabs(page, 'S21', 'cold inbox');
+      await ctx.close();
+    }
+    // S22 a double tap never zooms the page: touch-action manipulation on the page and on links
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/'); await sleep(600);
+      const ta = await page.evaluate(() => [document.documentElement, document.body, document.querySelector('article a, article b')].map((e) => getComputedStyle(e).touchAction).join(','));
+      if (ta.split(',').some((v) => v !== 'manipulation')) fail('S22', `touch-action is ${ta}, expected manipulation everywhere`);
       await ctx.close();
     }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
@@ -218,7 +320,7 @@ async function main() {
       await page.goto(BASE + '/'); await sleep(700);
       const n = await visibleCount(page, 'article');
       if (n !== 5) fail('S10', `expected 5 visible articles (1,3,4,5,7), got ${n}`);
-      if (!(await visible(page, 'nav'))) fail('S10', 'nav hidden');
+      if (!(await visible(page, '#tabbar'))) fail('S10', 'tab bar hidden');
       await ctx.close();
     }
     // S13: a reel shared in a DM opens as an overlay (no URL change): the lock must engage there,

@@ -8,14 +8,16 @@
 // ==/UserScript==
 (() => {
   const CFG = {
-    hideReelsFeed: true,       // the Reels tab and the endless /reels/ feed
-    singleReelOnly: true,      // a reel someone sends you still opens, but swiping to the next one is blocked
-    hideExplore: true,         // Explore / search tab + /explore/ pages
-    hideSponsored: true,       // ads in the feed
+    hideReelsFeed: true,        // the Reels tab and the endless /reels/ feed
+    singleReelOnly: true,       // a reel someone sends you still opens, but swiping to the next one is blocked
+    autoPlayReels: true,        // a reel that opens paused (Safari blocked Instagram's autoplay) is started for you
+    hideExplore: true,          // Explore / search tab + /explore/ pages
+    hideSponsored: true,        // ads in the feed
     hidePaidPartnership: false, // creators' "Paid partnership" posts (not Instagram ads)
-    hideSuggested: true,       // "Suggested for you" posts and account carousels
-    followingFeed: true,       // open the Following feed instead of the algorithmic one
-    hideAppPrompts: true,      // "Open in app" banners, App Store links, Safari's Smart App Banner
+    hideSuggestedAccounts: true, // the "Suggested for you" accounts carousel in the home feed
+    hideSuggestedPosts: false,  // recommended posts in the home feed (the feed is mostly these once you're caught up)
+    followingFeed: false,       // open the Following feed instead of Home
+    hideAppPrompts: true,       // "Open in app" banners, App Store links, Safari's Smart App Banner
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
@@ -28,7 +30,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '12';
+  const SITE_VERSION = '13';
   const DEBUG = true; // status strip at the bottom + event log in <html data-focus-log>; set false once the bugs are gone
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -68,13 +70,15 @@
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
     if (CFG.hideExplore && p.startsWith('/explore')) { location.replace('/'); return; }
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
-    lockSwipe(CFG.singleReelOnly && isReelPage(p));
+    recheckLock();
     log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
   setInterval(() => { if (location.href !== last) { last = location.href; route(); } }, 300);
 
-  // 2. Swipe lock, engaged by URL only (/reel/ID and /reels/ID), so nothing is measured on other pages.
+  // 2. Swipe lock, engaged by URL (/reel/ID and /reels/ID) or by content: a reel opened from a DM is an
+  // overlay on top of the DM page, the URL does not change, so a near-fullscreen video sitting in a
+  // scroll box also engages it. That check runs only when a video is added or removed, never on a timer.
   // The reel feed is a scroll box (a div that scrolls, holding one reel after another); a reel opened on
   // its own (/reel/ID) is a plain page whose caption and comments sit below the video. So the lock pins
   // only reel scroll boxes, found by walking up from each video (a dozen nodes, never a page-wide
@@ -90,6 +94,23 @@
   const reelBoxOf = (video) => {
     for (let el = video.parentElement, i = 0; el && i < 25; el = el.parentElement, i++) if (isScrollBox(el)) return el;
     return null;
+  };
+  const isFullscreenVideo = (v) => { const r = v.getBoundingClientRect(); return r.height >= innerHeight * 0.85 && r.width >= innerWidth * 0.6; };
+  const overlayReel = () => [...document.querySelectorAll('video')].some((v) => isFullscreenVideo(v) && reelBoxOf(v) !== null);
+  let recheckTimer = null;
+  const recheckLock = () => {
+    clearTimeout(recheckTimer);
+    const apply = () => lockSwipe(CFG.singleReelOnly && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+    apply();
+    recheckTimer = setTimeout(apply, 400); // once more after the overlay has laid out
+  };
+  // A reel that opens paused: Instagram calls play() after the data arrives, outside the tap that opened
+  // it, and Safari refuses. Starting it ourselves from the same moment works for a muted video.
+  const nudgePlay = (v) => {
+    if (!CFG.autoPlayReels) return;
+    const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v)) { v.play().then(() => log('play', 'started paused reel')).catch(() => {}); } };
+    v.addEventListener('loadeddata', tryPlay, { once: true });
+    setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);
   };
   const shouldBlock = (target) => {
     if (!(target instanceof Element)) return false;
@@ -144,9 +165,10 @@
   // 4. Content: labels matched by exact visible text (EN + FR). Only nodes Instagram adds are examined
   // (incremental, via the mutation records), never the whole page again, and only leaf elements are read:
   // on Instagram every wrapper div has a single child, so reading text on wrappers would re-read the
-  // whole page hundreds of times. A label hides its post (closest <article>). The only thing hidden
-  // without a post wrapper is a "Suggested for you" carousel in the home feed, where the largest wrapper
-  // holding no post is hidden; anywhere else a stray label hides nothing, so a page can never go blank.
+  // whole page hundreds of times. A label hides its post (closest <article>). "Suggested for you" inside a
+  // post marks a recommended post (kept unless hideSuggestedPosts); outside a post, in the home feed, it
+  // is the accounts carousel, where the largest wrapper holding no post is hidden. Anywhere else a stray
+  // label hides nothing, so a page can never go blank.
   const LEAF = 'span, h2, h3, h4, div, button, a';
   const sponsoredWords = [...(CFG.hideSponsored ? WORDS.sponsored : []), ...(CFG.hidePaidPartnership ? WORDS.partnership : [])];
   const hide = (node, why) => {
@@ -171,7 +193,10 @@
     const post = el.closest('article');
     if (sponsoredWords.some((w) => t.startsWith(w))) hide(post, 'ad:' + t.slice(0, 12)); // "Sponsored · 2h"
     else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && el.closest('a, button, [role="button"]')) hide(post, 'cta:' + t.slice(0, 12));
-    else if (CFG.hideSuggested && WORDS.suggested.includes(t)) hide(post || carouselOf(el), 'suggested');
+    else if (WORDS.suggested.includes(t)) {
+      if (post) { if (CFG.hideSuggestedPosts) hide(post, 'suggested-post'); }
+      else if (CFG.hideSuggestedAccounts) hide(carouselOf(el), 'suggested-accounts');
+    }
     // a dialog whose button says "Use the app" is the app prompt itself; in the header only the button goes
     else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el, 'app-prompt');
   };
@@ -188,12 +213,17 @@
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }
+      let videoChange = false;
       for (const n of m.addedNodes) {
         if (n.nodeType !== 1) continue;
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
         scan(n); // right away: a post hidden before the feed measures it never makes the feed jump
+        const vids = n.tagName === 'VIDEO' ? [n] : [...n.querySelectorAll('video')];
+        if (vids.length) { videoChange = true; for (const v of vids) nudgePlay(v); }
       }
+      for (const n of m.removedNodes) if (n.nodeType === 1 && (n.tagName === 'VIDEO' || n.querySelector?.('video'))) videoChange = true;
+      if (videoChange) recheckLock();
     }
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };

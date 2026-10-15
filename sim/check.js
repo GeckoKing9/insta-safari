@@ -48,7 +48,7 @@ async function main() {
     {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(700);
-      if (!page.url().includes('variant=following')) fail('S1', `expected Following feed, url=${page.url()}`);
+      if (page.url().includes('variant=')) fail('S1', `Home feed expected (followingFeed is off), url=${page.url()}`);
       if (await visible(page, 'a[href="/reels/"]')) fail('S1', 'Reels nav link visible');
       if (await visible(page, 'a[href^="/explore"]')) fail('S1', 'Explore nav link visible');
       if (!(await visible(page, '#feed'))) fail('S1', 'feed root hidden');
@@ -56,7 +56,7 @@ async function main() {
       if (!(await visible(page, 'article[data-id="4"]'))) fail('S1', 'normal post 4 hidden');
       if (!(await visible(page, 'article[data-id="3"]'))) fail('S1', 'post whose caption merely contains "sponsored" was hidden (false positive)');
       if (await visible(page, 'article[data-id="2"]')) fail('S1', 'sponsored post visible');
-      if (await visible(page, 'article[data-id="5"]')) fail('S1', 'suggested-posts article visible');
+      if (!(await visible(page, 'article[data-id="5"]'))) fail('S1', 'recommended ("Suggested posts") article hidden although hideSuggestedPosts is off');
       if (await visible(page, '.sugg')) fail('S1', 'suggested accounts carousel visible');
       await ctx.close();
     }
@@ -134,8 +134,27 @@ async function main() {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(700);
       const n = await visibleCount(page, 'article');
-      if (n !== 3) fail('S10', `expected 3 visible articles (1,3,4), got ${n}`);
+      if (n !== 4) fail('S10', `expected 4 visible articles (1,3,4,5), got ${n}`);
       if (!(await visible(page, 'nav'))) fail('S10', 'nav hidden');
+      await ctx.close();
+    }
+    // S13: a reel shared in a DM opens as an overlay (no URL change): the lock must engage there,
+    // swipes in the overlay must not advance, and closing it must release the DM list again
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(500);
+      await page.evaluate(() => document.getElementById('reelcard').scrollIntoView());
+      await page.click('#reelcard'); await sleep(900);
+      if (!(await visible(page, '#overlay'))) fail('S13', 'overlay did not open');
+      if (new URL(page.url()).pathname !== '/direct/t/1/') fail('S13', `URL changed on overlay open: ${page.url()}`);
+      await swipeUp(page, 200, 400); await sleep(300);
+      if (await page.evaluate(() => window.__oadvanced)) fail('S13', 'swipe inside the DM reel overlay advanced to the next reel (lock not engaged without a URL change)');
+      await page.tap('#olike'); await sleep(200);
+      await page.click('#oclose'); await sleep(600);
+      if (await visible(page, '#overlay')) fail('S13', 'overlay still open after close');
+      await page.evaluate(() => { window.__dmTouch = false; });
+      await swipeUp(page, 200, 300); await sleep(300);
+      if (!(await page.evaluate(() => window.__dmTouch))) fail('S13', 'DM list no longer receives touches after the overlay closed (lock not released)');
       await ctx.close();
     }
     // S11 main-thread jank under stress: event-loop lag with the script vs without

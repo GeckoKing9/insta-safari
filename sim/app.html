@@ -71,6 +71,7 @@
       let msgs = '';
       for (let i = 0; i < 40; i++) msgs += `<div class="msg">message ${i}</div>`;
       msgs += `<div class="msg"><a data-spa id="reellink" href="/reel/ABC123/">Reel from Marie</a></div>`;
+      msgs += `<div class="msg"><div role="button" id="reelcard">Reel from Paul (opens as an overlay)</div></div>`;
       return `${nav()}<main id="dm"><div id="dmlist">${msgs}</div></main>`;
     },
     reel(id) {
@@ -119,6 +120,22 @@
       dmlist.addEventListener('touchmove', () => { window.__dmTouch = true; });
       dmlist.addEventListener('scroll', () => { window.__dmTouch = true; });
     }
+    // a reel shared in a DM opens as an overlay on top of the thread: no URL change, a scroll box of reels
+    const card = document.getElementById('reelcard');
+    if (card) card.addEventListener('click', () => {
+      window.__oadvanced = false;
+      const ov = document.createElement('div');
+      ov.setAttribute('role', 'dialog'); ov.id = 'overlay';
+      ov.style.cssText = 'position:fixed;inset:0;background:#000;color:#fff;z-index:10';
+      ov.innerHTML = `<div id="oviewer" style="height:100%;overflow:auto"><div class="oslide" style="height:100%"><video muted playsinline style="display:block;width:100%;height:95%"></video><button id="olike">Like</button></div><div class="oslide" style="height:100%">next reel</div></div><button id="oclose" style="position:absolute;top:8px;right:8px">Close</button>`;
+      document.body.appendChild(ov);
+      const ovw = document.getElementById('oviewer');
+      let y0 = null;
+      ovw.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; });
+      ovw.addEventListener('touchmove', (e) => { if (y0 !== null && y0 - e.touches[0].clientY > 30) { y0 = null; window.__oadvanced = true; } });
+      ovw.addEventListener('scroll', () => { if (ovw.scrollTop > 250) window.__oadvanced = true; });
+      document.getElementById('oclose').addEventListener('click', () => ov.remove());
+    });
   };
   const advance = () => {
     window.__advanced = true;

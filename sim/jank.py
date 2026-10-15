@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure home-feed scroll smoothness on the phone: auto-scroll for 5 s while counting animation frames
 and long main-thread tasks. Run once with the script installed and once with a blank script for an A/B.
+Note: WebKit has no 'longtask' performance entries, so on the iPhone the long-task numbers are always 0; fps is the signal.
 Usage: jank.py <label>"""
 import asyncio, sys
 from _device import inspector, instagram_pages, session, ev, out

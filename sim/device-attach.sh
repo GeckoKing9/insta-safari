@@ -8,9 +8,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PMD="$ROOT/.venv/bin/pymobiledevice3"
 export USBMUXD_SOCKET_ADDRESS=/var/run/usbmuxd
 
-B=$(powershell.exe -NoProfile -Command 'usbipd list' | tr -d '\r' | grep -i 'apple' | head -1 | awk '{print $1}')
+CONNECTED=$(powershell.exe -NoProfile -Command 'usbipd list' | tr -d '\r' | sed -n '/^Connected:/,/^$/p')  # not the Persisted rows
+B=$(grep -i 'apple' <<<"$CONNECTED" | head -1 | awk '{print $1}')
 [ -z "${B:-}" ] && { echo "iPhone not found on the Windows USB bus. Plug it in with a data cable and unlock it."; exit 1; }
-STATE=$(powershell.exe -NoProfile -Command 'usbipd list' | tr -d '\r' | grep -i 'apple' | head -1 | awk '{print $NF}')
+STATE=$(grep -i 'apple' <<<"$CONNECTED" | head -1 | awk '{print $NF}')
 if [ "$STATE" = "Attached" ] && timeout 15 "$PMD" usbmux list 2>/dev/null | grep -q ProductVersion; then
   echo "already attached and answering (bus $B)"; exit 0
 fi

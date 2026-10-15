@@ -55,6 +55,12 @@
 
   const views = {
     home() {
+      if (localStorage.getItem('lateFeed') === '1') {
+        setTimeout(() => document.getElementById('feedwrap')?.insertAdjacentHTML('beforeend',
+          `<div class="sugg"><div><h3>${T.suggested}</h3></div><div class="carousel"><a data-spa href="/u1/">user1</a></div></div>`), 100);
+        setTimeout(() => document.getElementById('feedwrap')?.insertAdjacentHTML('beforeend', post(1, 'Nice day at the beach') + post(4, 'My cat')), 700);
+        return `${nav()}<main><div id="col"><div id="stories">stories tray</div><div id="feedwrap"></div></div></main>`;
+      }
       const q = new URLSearchParams(location.search);
       const variant = q.get('variant') || 'home';
       let articles = '';
@@ -70,6 +76,11 @@
       articles += post(6, 'Great shoes', `<div><a href="https://l.instagram.com/?u=https%3A%2F%2Fshoes.example%2F"><span>Shop now</span></a></div>`);
       // an organic post with a sensitive-content overlay: a "Learn more" button that goes nowhere off-site
       articles += post(7, 'Sensitive post', `<div><button><span>Learn more</span></button></div>`);
+      // a friend's caption, under 40 characters, that merely starts with the ad word: not an ad
+      articles += post(8, `${T.sponsored} by my mom lol`);
+      // an ad whose label span renders empty and gets its text a moment later (a new text node)
+      articles += post(9, 'Late label ad', `<div><span id="latelabel"></span></div>`);
+      setTimeout(() => { const l = document.getElementById('latelabel'); if (l) l.textContent = T.sponsored; }, 300);
       const stress = localStorage.getItem('stress') === '1';
       if (stress) for (let i = 10; i < 310; i++) articles += post(i, 'stress post ' + i);
       return `${banner()}${nav()}<main><div id="variant">${variant}</div><section id="feed">${articles}</section></main>${dialog()}`;
@@ -104,7 +115,7 @@
       let rows = '';
       for (let i = 0; i < 30; i++) rows += `<div role="button" class="row" style="height:72px">chat ${i}</div>`;
       return `<main id="inbox"><div style="height:60px"><div role="button" aria-label="Back" id="back">&lt;</div>
-        <div role="button" id="acct"><span>me</span><svg aria-label="${fr ? 'Icône de chevron vers le bas' : 'Down chevron icon'}" width="12" height="12"></svg></div></div>
+        <div role="button" id="acct"><span>me</span><svg aria-label="${fr ? 'Icône de chevron vers le bas' : 'Down chevron icon'}" width="12" height="12"><title>${fr ? 'Icône de chevron vers le bas' : 'Down chevron icon'}</title></svg></div></div>
         <div id="inboxlist" style="position:absolute;top:60px;bottom:0;left:0;right:0;overflow:auto">
         <a data-spa id="marie" href="/direct/t/1/">Marie</a>${rows}<div role="button" class="row" id="lastrow" style="height:72px">oldest chat</div></div></main>`;
     },
@@ -114,15 +125,17 @@
       msgs += `<div class="msg"><a data-spa id="reellink" href="/reel/ABC123/">Reel from Marie</a></div>`;
       msgs += `<div class="msg"><div role="button" id="reelcard">Reel from Paul (opens as an overlay)</div></div>`;
       // a post shared in the thread: its message row reveals React / Reply / More on hover (measured on the phone)
+      msgs += `<div class="msg"><a id="appstorelink" href="https://apps.apple.com/ca/app/some-game/id123456789">apps.apple.com/ca/app/some-game</a></div>`;
+      msgs += `<div role="group" class="textrow" id="textmsg" style="height:50px"><div id="textbubble">hey, what's up</div><div data-actions style="visibility:hidden">React Reply</div></div>`;
       msgs += `<div class="msg rowfirst" style="height:40px">message just before the shared post</div>`;
       msgs += `<div role="group" id="sharedmsg" class="rowmarker" style="min-height:120px"><a data-spa id="sharedpost" href="/p/S1/" style="display:block;height:100px">post shared by Marie</a>
-        <div id="msgactions" style="visibility:hidden"><span>React</span> <span>Reply</span></div><div id="msgtext" style="height:40px">caption under the post</div><div id="cssactions">More</div></div>`;
+        <div id="msgactions" style="visibility:hidden"><span>React</span> <span>Reply</span></div><div id="msgtext" style="height:40px">caption under the post</div><div id="sharedcaption" style="height:30px;cursor:pointer">sistosterone: open the post</div><div id="cssactions">More</div></div>`;
       return `<main id="dm"><div style="height:40px">Marie</div><div id="dmlist">${msgs}</div></main>`;
     },
     reel(id) {
       // native vertical scroller holding the current reel and the next one, like Instagram's reel feed
       return `<main id="reel"><div id="viewer"><div class="slide"><video id="v" muted playsinline></video><div>reel ${id}</div>
-        <button id="like">Like</button></div><div class="slide">next reel</div></div><div id="comments">${'<p>comment</p>'.repeat(30)}</div></main>`;
+        <button id="like">Like</button><div id="caption" style="height:60px;overflow:auto">${'<p>caption line</p>'.repeat(12)}</div></div><div class="slide">next reel</div></div><div id="comments">${'<p>comment</p>'.repeat(30)}</div></main>`;
     },
     // notifications (structure measured on the phone): activity sections, then at the end a "Suggested for you"
     // heading, a list of accounts with Follow buttons (one row's reason line also says "Suggested for you") and a
@@ -142,6 +155,7 @@
       document.getElementById('nlist')?.insertAdjacentHTML('beforeend', `<div id="slist"><div><span>acc1</span><span>${T.suggested}</span><div role="button">${T.follow}</div></div>
           <div><span>acc2</span><span>Followed by x</span><div role="button">${T.follow}</div></div></div>
         <div id="sall"><a data-spa href="/explore/people/">${T.seeAll}</a></div>`);
+      setTimeout(() => document.getElementById('nlist')?.insertAdjacentHTML('beforeend', `<div id="slate"><span>acc3</span><div role="button">${T.follow}</div></div>`), 1500);
     },
     other() { return `${nav()}<main id="other">page</main>`; },
   };
@@ -180,13 +194,16 @@
     const viewer = document.getElementById('viewer');
     if (viewer) {
       let y0 = null;
-      viewer.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; });
+      // a swipe inside the reel's own scrollable caption scrolls the caption, not the reels
+      viewer.addEventListener('touchstart', (e) => { y0 = e.target.closest('#caption') ? null : e.touches[0].clientY; });
       viewer.addEventListener('touchmove', (e) => {
         if (y0 !== null && y0 - e.touches[0].clientY > 30) { y0 = null; advance(); }
       });
       viewer.addEventListener('wheel', (e) => { if (e.deltaY > 30) advance(); });
       viewer.addEventListener('scroll', () => { if (viewer.scrollTop > 250) advance(); });
       document.getElementById('like').addEventListener('click', () => { window.__liked = true; });
+      window.__captionMoveSeen = false;
+      document.getElementById('caption').addEventListener('touchmove', () => { window.__captionMoveSeen = true; });
       // the comments sheet records whether touch moves reach it (the lock must not swallow them)
       window.__commentsMoveSeen = false;
       document.getElementById('comments').addEventListener('touchmove', () => { window.__commentsMoveSeen = true; });
@@ -222,10 +239,17 @@
   // like React, hover handlers are delegated to the root container; a hover on a message row reveals its actions
   // (iOS Safari then treats the tap as a hover and does not click: the post needs a second tap)
   window.__hoverRevealed = false;
+  let rootEl0;
   // React's enter/leave: an over event whose relatedTarget is React-managed is skipped, because the enter was already
   // dispatched from that element's out event (out: from = target, to = relatedTarget). So the reveal comes from
   // mouseout of the previously hovered element as well as from mouseover when coming from outside.
-  const reveal = (to) => { const g = to && to.closest && to.closest('#sharedmsg'); if (g) { window.__hoverRevealed = true; g.querySelector('#msgactions').style.visibility = 'visible'; } };
+  window.__textRevealed = false;
+  const reveal = (to) => {
+    const g = to && to.closest && to.closest('#sharedmsg'); if (g) { window.__hoverRevealed = true; g.querySelector('#msgactions').style.visibility = 'visible'; }
+    const t = to && to.closest && to.closest('#textmsg'); if (t) { window.__textRevealed = true; t.querySelector('[data-actions]').style.visibility = 'visible'; }
+  };
+  rootEl0 = document.getElementById('root');
+  rootEl0.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#sharedcaption')) { history.pushState(null, '', '/p/S1/'); render(); } });
   const rootEl = document.getElementById('root');
   for (const t of ['mouseover', 'pointerover']) rootEl.addEventListener(t, (e) => { if (!(e.relatedTarget && rootEl.contains(e.relatedTarget))) reveal(e.target); });
   for (const t of ['mouseout', 'pointerout']) rootEl.addEventListener(t, (e) => reveal(e.relatedTarget));

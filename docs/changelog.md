@@ -1,6 +1,20 @@
 # Changelog
 
-## v19 (2026-10-15, not yet released)
+## v20 (2026-10-15, release v0.3 once checked on the phone)
+Fixes from the final review of the whole repo (69 findings; every behaviour fix has a harness scenario that failed first):
+- One tap keeps DM actions reachable: a finger's hover is blocked only when it lands on something that opens (link, button, `cursor: pointer`), so tapping a plain message bubble still shows React / Reply / More, while a shared post still opens on the first tap.
+- A friend's caption that starts with "Sponsored..." is no longer taken for an ad: the label must be the word alone or followed by a separator. Ad labels whose text arrives after the element are now seen. "Learn more" links to Instagram's or Meta's own help pages are not ad links.
+- App Store links people send stay visible; only links to the Instagram app itself are hidden.
+- The reel lock can't be walked past by smooth or stepped scrolling; pinches and taps pass; two fingers landing together don't bypass it; an overlay that opens slowly is caught (third check at 1.2 s).
+- Home can't go blank: a suggested-accounts unit that arrives before any post is decided once a post exists.
+- Inbox tab bar: Profile follows the signed-in account (Instagram's icon `<title>` had made the name lookup fail), Back after a cold Profile tap skips Home, it is drawn only on phone-width layouts, redrawn on a light/dark switch, and remembers nothing when `inboxTabBar` is off.
+- `hideSearch` no longer catches profiles like `/explorecanada/`; `/explore/people/` (the full suggested-accounts page) goes home under `hideSuggestedAccounts`. The search pages get room below the lifted tab bar.
+- Notifications: suggestion blocks added after the first pass are hidden too.
+- Installed twice, the script runs once. Debug code removed. `@version` added (kept equal to `SITE_VERSION`, checked by the harness) for updates.
+- Since v15 (v0.2) the ad call-to-action check needs the label inside a link that leaves Instagram, not any button; earlier notes said "button".
+- Harness: S25-S29 (App Store links, `/explore/people/`, late Home feed, two copies, iPad width), S4c (stepped scroll), S1/S23/S24/S12 strengthened, S9 with the Following feed on; a crash still prints the failures already found. Phone tools: version-exact PASS, the script's own lock flag, all tile forms, the padded inbox box, readable errors; `readlog.py` removed with the debug code.
+
+## v19 (2026-10-15)
 - One tap opens a post shared in a DM (`oneTap`). For Safari a tap is first a hover: it sends hover events and puts `:hover` on what the finger touched, and if that makes something appear it clicks only on the second tap. Instagram's web app reveals desktop hover extras both ways (measured on the phone: a DM message row shows React / Reply / More from a mouseover handler and from `:hover` rules, opacity 0 to 1).
   - Hover events from a finger or pen (over, enter, move, and out/leave too) no longer reach Instagram's handlers. Out/leave matter: React dispatches onMouseEnter from the previous element's mouseout, and iOS keeps the last tapped element hovered, so every tap after the first still revealed (confirmed on the phone with a control run). A real mouse (iPad pointer) still hovers.
   - On a device where nothing can hover (`any-hover: none`), every `:hover` in Instagram's stylesheets is rewritten never to match (278 of ~19k rules, ~20 ms once): the page behaves as if nothing were ever hovered, `:not(:hover)` and `:has(:hover)` included. Sheets are rescanned when their rule count changes, on every page change and when a stylesheet arrives.

@@ -5,3 +5,5 @@ node_modules/
 sim/usbmuxd.log
 __pycache__/
 *.pyc
+icon/*.png
+TASKS.md

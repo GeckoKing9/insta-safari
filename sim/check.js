@@ -14,13 +14,14 @@ const fail = (id, why) => fails.push(`FAIL ${id}: ${why}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // cfg: CFG lines to flip, e.g. { 'hideSearch: false,': 'hideSearch: true,' }; a line that is not in the script fails loudly
-async function newPage(browser, { script = true, storage = {}, cfg = {} } = {}) {
-  const ctx = await browser.newContext({ ...devices['iPhone 15 Pro Max'], locale: 'en-CA' });
+async function newPage(browser, { script = true, storage = {}, cfg = {}, device = 'iPhone 15 Pro Max', copies = 1 } = {}) {
+  const ctx = await browser.newContext({ ...devices[device], locale: 'en-CA' });
   await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
   let src = SCRIPT;
   for (const [from, to] of Object.entries(cfg)) { if (!src.includes(from)) throw new Error(`CFG line not found: ${from}`); src = src.replace(from, to); }
-  if (script) await ctx.addInitScript(src);
+  if (script) for (let i = 0; i < copies; i++) await ctx.addInitScript(src);
   const page = await ctx.newPage();
+  page.setDefaultTimeout(8000); // a missing target fails its scenario fast instead of stalling 30 s
   // S0 sentinel: any uncaught error in the page (the script's or the fixture's) is a failure
   page.on('pageerror', (e) => fail('S0', `page error: ${e.message.slice(0, 120)}`));
   return { ctx, page };
@@ -72,13 +73,17 @@ const tapOr = (page, sel, id) => page.click(sel, { timeout: 3000 }).then(() => t
 async function serverUp() { try { const r = await fetch(BASE + '/'); return r.ok; } catch { return false; } }
 
 async function main() {
+  // S0 the two version numbers agree: Userscripts offers an update only when @version grows
+  const metaV = (SCRIPT.match(/@version\s+(\S+)/) || [])[1], siteV = (SCRIPT.match(/SITE_VERSION = '([^']+)'/) || [])[1];
+  if (!metaV || metaV !== siteV) fail('S0', `@version ${metaV} and SITE_VERSION ${siteV} differ`);
   if (await serverUp()) { console.log(`FAIL harness: something already listens on ${BASE} (a stale fixture server?)`); process.exit(2); }
   const server = spawn('python3', [path.join(__dirname, 'server.py'), String(PORT)], { stdio: ['ignore', 'ignore', 'pipe'] });
   let serverErr = ''; server.stderr.on('data', (d) => { serverErr += d; });
   for (let i = 0; i < 30 && !(await serverUp()); i++) await sleep(100);
   if (!(await serverUp())) { console.log('FAIL harness: fixture server did not start: ' + serverErr.slice(0, 200)); server.kill(); process.exit(2); }
-  const browser = await chromium.launch();
+  let browser;
   try {
+    browser = await chromium.launch();
     // S1 home load
     {
       const { ctx, page } = await newPage(browser);
@@ -91,6 +96,9 @@ async function main() {
       if (!(await visible(page, 'article[data-id="1"]'))) fail('S1', 'normal post 1 hidden');
       if (!(await visible(page, 'article[data-id="4"]'))) fail('S1', 'normal post 4 hidden');
       if (!(await visible(page, 'article[data-id="3"]'))) fail('S1', 'post whose caption merely contains "sponsored" was hidden (false positive)');
+      if (!(await visible(page, 'article[data-id="8"]'))) fail('S1', 'friend\'s short caption "Sponsored by my mom lol" was hidden as an ad');
+      await sleep(500);
+      if (await visible(page, 'article[data-id="9"]')) fail('S1', 'ad whose "Sponsored" label text arrived after insertion stayed visible');
       if (await visible(page, 'article[data-id="2"]')) fail('S1', 'sponsored post visible');
       if (!(await visible(page, 'article[data-id="5"]'))) fail('S1', 'recommended ("Suggested posts") article hidden although hideSuggestedPosts is off');
       if (await visible(page, '.sugg')) fail('S1', 'suggested accounts carousel visible');
@@ -202,6 +210,8 @@ async function main() {
         await page.goto(BASE + p); await sleep(900);
         if (new URL(page.url()).pathname !== '/') fail('S18', `${p} not redirected with hideSearch on, url=${page.url()}`);
       }
+      await page.goto(BASE + '/explorecanada/'); await sleep(900);
+      if (new URL(page.url()).pathname !== '/explorecanada/') fail('S18', `the profile /explorecanada/ was redirected as if it were Explore, url=${page.url()}`);
       await ctx.close();
     }
     // S19 the 4 tabs (Home, Search, Messages, Profile) sit mirror-symmetric with equal gaps wherever the bar shows
@@ -274,9 +284,9 @@ async function main() {
     // home carousel; activity rows stay, including one with its own Follow button
     for (const [lang, layout] of [['en', 'flat'], ['fr', 'flat'], ['en', 'nested']]) {
       const { ctx, page } = await newPage(browser, { storage: { lang, notifLayout: layout } });
-      await page.goto(BASE + '/notifications/'); await sleep(1300); // the list lands 400 ms after its heading
+      await page.goto(BASE + '/notifications/'); await sleep(2300); // the list lands 400 ms after its heading, one more block at 1.5 s
       for (const id of ['n1', 'n2']) if (!(await visible(page, '#' + id))) fail('S23', `${lang}/${layout}: activity row #${id} hidden`);
-      for (const id of ['shead', 'slist', 'sall']) if (await visible(page, '#' + id)) fail('S23', `${lang}/${layout}: suggested-accounts part #${id} visible`);
+      for (const id of ['shead', 'slist', 'sall', 'slate']) if (await visible(page, '#' + id)) fail('S23', `${lang}/${layout}: suggested-accounts part #${id} visible`);
       await ctx.close();
     }
     // S24 one tap opens a post shared in a DM: the hover events a finger's tap sends first never reach the page's
@@ -301,7 +311,19 @@ async function main() {
       if (await page.evaluate(() => window.__hoverRevealed)) fail('S24', "a finger's tap ran the page's hover handler (Safari swallows such a tap as a hover)");
       // sanity only: Chromium never turns a tap into a hover-only tap, so this cannot fail for the bug itself
       if (new URL(page.url()).pathname !== '/p/S1/') fail('S24', `the tap did not open the shared post, url=${page.url()}`);
-      await page.goBack(); await sleep(1500);
+      await page.goBack(); await sleep(600);
+      // a clickable part of the card that is not a link (cursor: pointer): still no hover first
+      await page.evaluate(() => { window.__hoverRevealed = false; document.getElementById('sharedmsg').scrollIntoView({ block: 'center' }); });
+      await page.tap('.rowfirst'); await sleep(300);
+      await page.evaluate(() => { window.__hoverRevealed = false; });
+      await page.tap('#sharedcaption'); await sleep(500);
+      if (await page.evaluate(() => window.__hoverRevealed)) fail('S24', 'a tap on a clickable (cursor: pointer) part of the shared post ran the hover handler');
+      await page.goBack(); await sleep(600);
+      // a plain text message is not clickable: its tap keeps the hover, so React / Reply / More stay reachable
+      await page.evaluate(() => document.getElementById('textmsg').scrollIntoView({ block: 'center' }));
+      await page.tap('#textbubble'); await sleep(400);
+      if (!(await page.evaluate(() => window.__textRevealed))) fail('S24', 'tapping a text message no longer reveals its React / Reply / More (only hover reaches them)');
+      await sleep(1100);
       await page.evaluate(() => { window.__hoverRevealed = false; document.getElementById('sharedmsg').scrollIntoView({ block: 'center' }); });
       const box = await page.evaluate(() => { const r = document.getElementById('sharedpost').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
       await page.mouse.move(box.x, box.y); await sleep(200);
@@ -314,6 +336,39 @@ async function main() {
       await page.goto(BASE + '/'); await sleep(600);
       const ta = await page.evaluate(() => [document.documentElement, document.body, document.querySelector('article a, article b')].map((e) => getComputedStyle(e).touchAction).join(','));
       if (ta.split(',').some((v) => v !== 'manipulation')) fail('S22', `touch-action is ${ta}, expected manipulation everywhere`);
+      await ctx.close();
+    }
+    // S25 user content keeps its links: an App Store link a friend sends stays (only Instagram's own app prompts go)
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(500);
+      if (!(await page.evaluate(() => getComputedStyle(document.getElementById('appstorelink')).display !== 'none'))) fail('S25', 'an App Store link sent in a DM was hidden');
+      await page.goto(BASE + '/explore/people/'); await sleep(900);
+      if (new URL(page.url()).pathname !== '/') fail('S25', `the suggested-accounts page /explore/people/ stayed open, url=${page.url()}`);
+      await ctx.close();
+    }
+    // S26 Home never goes blank: a suggestions unit that arrives before any post in its column hides only itself
+    {
+      const { ctx, page } = await newPage(browser, { storage: { lateFeed: '1' } });
+      await page.goto(BASE + '/'); await sleep(1600);
+      if (!(await visible(page, '#stories'))) fail('S26', 'the stories tray went blank with the suggestions unit');
+      if ((await visibleCount(page, 'article')) !== 2) fail('S26', `posts added after the suggestions unit are not visible (${await visibleCount(page, 'article')} of 2)`);
+      if (await visible(page, '.sugg')) fail('S26', 'suggested-accounts unit visible');
+      await ctx.close();
+    }
+    // S27 two installed copies of the script behave like one (one inbox bar, Cancel steps back once)
+    {
+      const { ctx, page } = await newPage(browser, { copies: 2 });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      const bars = await page.evaluate(() => document.querySelectorAll('#focus-tabbar').length);
+      if (bars !== 1) fail('S27', `${bars} inbox tab bars with the script installed twice`);
+      await ctx.close();
+    }
+    // S29 the phone tab bar is drawn only on a phone layout, not on iPad / desktop widths (side navigation)
+    {
+      const { ctx, page } = await newPage(browser, { device: 'iPad Pro 11 landscape' });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      if (await page.evaluate(() => !!document.getElementById('focus-tabbar'))) fail('S29', 'phone tab bar drawn on an iPad-width layout');
       await ctx.close();
     }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
@@ -333,6 +388,7 @@ async function main() {
       await page.click('#reellink'); await sleep(600);
       if (new URL(page.url()).pathname !== '/reel/ABC123/') fail('S4', `reel did not open, url=${page.url()}`);
       if (!(await visible(page, '#viewer'))) fail('S4', 'reel viewer not visible');
+      if (!(await page.evaluate(() => document.documentElement.hasAttribute('data-focus-locked')))) fail('S4', 'lock state not exposed (data-focus-locked)');
       await swipeUp(page, 200, 400); await sleep(300);
       const adv = await page.evaluate(() => window.__advanced);
       if (adv || new URL(page.url()).pathname !== '/reel/ABC123/') fail('S4', `swipe advanced to next reel, url=${page.url()}`);
@@ -341,6 +397,9 @@ async function main() {
       const cBox = await page.evaluate(() => { const r = document.getElementById('comments').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height * 0.8 }; });
       await swipeUp(page, cBox.x, cBox.y); await sleep(300);
       if (!(await page.evaluate(() => window.__commentsMoveSeen))) fail('S12', 'touch moves on the comments sheet were swallowed by the reel lock');
+      const cap = await page.evaluate(() => { const r = document.getElementById('caption').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height * 0.8 }; });
+      await swipeUp(page, cap.x, cap.y); await sleep(300);
+      if (!(await page.evaluate(() => window.__captionMoveSeen))) fail('S12', 'touch moves on a scrollable caption inside the reel box were swallowed');
       if (await page.evaluate(() => window.__advanced)) fail('S12', 'scrolling the comments advanced the reel');
       await page.mouse.move(200, 400); await page.mouse.wheel(0, 200); await sleep(300);
       if (await page.evaluate(() => window.__advanced)) fail('S4', 'wheel advanced to next reel');
@@ -350,6 +409,17 @@ async function main() {
       if (new URL(page.url()).pathname !== '/direct/t/1/') fail('S6', `back did not return to DM, url=${page.url()}`);
       await swipeUp(page, 200, 300); await sleep(300);
       if (!(await page.evaluate(() => window.__dmTouch))) fail('S6', 'DM list did not receive touch after leaving reel (lock not released)');
+      await ctx.close();
+    }
+    // S4c the lock holds against a scroll that comes in small steps with no finger down (smooth scrolling, keys):
+    // each step under half a reel used to be accepted as Instagram re-centring, so 40 steps walked to the next reel
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/reel/ABC123/'); await sleep(700);
+      for (let i = 0; i < 40; i++) { await page.evaluate(() => { const v = document.getElementById('viewer'); if (v) v.scrollTop += 15; }); await sleep(15); }
+      await sleep(300);
+      const st = await page.evaluate(() => [window.__advanced, document.getElementById('viewer')?.scrollTop]);
+      if (st[0] || st[1] > 150) fail('S4c', `stepwise scrolling walked the locked reel box to ${st[1]} px (advanced=${st[0]})`);
       await ctx.close();
     }
     // S4b /reels/ID form opens
@@ -380,7 +450,7 @@ async function main() {
     }
     // S9 no reload loop when IG strips the query
     {
-      const { ctx, page } = await newPage(browser, { storage: { strip: '1' } });
+      const { ctx, page } = await newPage(browser, { storage: { strip: '1' }, cfg: { 'followingFeed: false,': 'followingFeed: true,' } });
       let navs = 0;
       page.on('framenavigated', (f) => { if (f === page.mainFrame()) navs++; });
       await page.goto(BASE + '/'); await sleep(2500);
@@ -392,7 +462,7 @@ async function main() {
       const { ctx, page } = await newPage(browser);
       await page.goto(BASE + '/'); await sleep(700);
       const n = await visibleCount(page, 'article');
-      if (n !== 5) fail('S10', `expected 5 visible articles (1,3,4,5,7), got ${n}`);
+      if (n !== 6) fail('S10', `expected 6 visible articles (1,3,4,5,7,8), got ${n}`);
       if (!(await visible(page, '#tabbar'))) fail('S10', 'tab bar hidden');
       await ctx.close();
     }
@@ -440,11 +510,12 @@ async function main() {
       console.log(`info S11: lag baseline ${base.toFixed(0)}ms, with script ${withScript.toFixed(0)}ms`);
     }
   } finally {
-    await browser.close();
+    await browser?.close();
     server.kill();
   }
   for (const f of fails) console.log(f);
   console.log(fails.length ? `${fails.length} failing` : 'ALL PASS');
   process.exit(fails.length ? 1 : 0);
 }
-main().catch((e) => { console.log('FAIL harness: ' + e.message); process.exit(2); });
+// a crash still reports what had already failed, then the crash itself
+main().catch((e) => { for (const f of fails) console.log(f); console.log('FAIL harness: ' + e.message.split('\n')[0]); process.exit(2); });

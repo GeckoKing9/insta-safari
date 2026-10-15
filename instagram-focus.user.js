@@ -1,14 +1,22 @@
 // ==UserScript==
 // @name         Instagram Focus
-// @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested posts or "open the app" prompts. Toggles below.
+// @namespace    https://github.com/GeckoKing9/insta-safari
+// @version      20
+// @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested accounts or "open the app" prompts; four even tabs, one tap per action. Toggles below.
+// @homepageURL  https://github.com/GeckoKing9/insta-safari
+// @updateURL    https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js
+// @downloadURL  https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js
 // @match        https://www.instagram.com/*
 // @run-at       document-start
 // @inject-into  content
 // @noframes
 // ==/UserScript==
 (() => {
+  // installed twice (e.g. once from the Install button, once copied into the folder): only the first copy runs
+  if (window.__instagramFocus || document.documentElement?.dataset.focusVersion) return;
+  window.__instagramFocus = true;
   const CFG = {
-    hideReelsFeed: true,        // the Reels tab and the endless /reels/ feed
+    hideReelsFeed: true,        // the Reels tab and the endless /reels/ feed (with false, also set singleReelOnly false to scroll it)
     singleReelOnly: true,       // a reel someone sends you still opens, but swiping to the next one is blocked
     autoPlayReels: true,        // a reel that opens paused (Safari blocked Instagram's autoplay) is started for you
     hideExplore: true,          // the recommended grid on the search tab; search itself (box, results, hashtag and place pages) stays
@@ -18,9 +26,9 @@
     hideSuggestedAccounts: true, // the "Suggested for you" accounts: the carousel in the home feed, the list under notifications
     hideSuggestedPosts: false,  // recommended posts in the home feed (the feed is mostly these once you're caught up)
     followingFeed: false,       // open the Following feed instead of Home
-    hideAppPrompts: true,       // "Open in app" banners, App Store links, Safari's Smart App Banner
+    hideAppPrompts: true,       // "Open in app" banners, links to the Instagram app, Safari's Smart App Banner
     inboxTabBar: true,          // the four tabs stay at the bottom of the DM inbox (Instagram shows none there)
-    oneTap: true,               // a tap is never taken as a hover first (a post shared in a DM needed two taps)
+    oneTap: true,               // a tap on something you can open is never taken as a hover first (a post shared in a DM needed two taps)
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
@@ -34,31 +42,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '19';
-  const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
-
-  // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
-  const logs = [];
-  let strip = null, hiddenCount = 0;
-  const describe = (el) => {
-    if (!(el instanceof Element)) return String(el && el.nodeName);
-    const a = el.closest('a[href]'); const b = el.closest('button, [role="button"]');
-    return [el.tagName.toLowerCase(), el.getAttribute('aria-label') || el.getAttribute('role') || '',
-      a ? 'a:' + a.getAttribute('href').slice(0, 28) : '', b ? 'btn:' + (b.getAttribute('aria-label') || b.textContent.trim()).slice(0, 18) : '',
-      el.closest('article') ? 'in-article' : '', el.closest('video') || el.querySelector?.('video') ? 'video' : ''].filter(Boolean).join(' ');
-  };
-  const log = (kind, detail) => {
-    if (!DEBUG) return;
-    const line = `${new Date().toTimeString().slice(3, 8)} ${kind} ${detail}`;
-    logs.push(line); if (logs.length > 40) logs.shift();
-    if (document.documentElement) document.documentElement.dataset.focusLog = JSON.stringify(logs);
-    if (!strip && document.body) {
-      strip = document.createElement('div');
-      strip.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.75);color:#9f9;font:10px/1.3 -apple-system,monospace;padding:2px 6px;pointer-events:none;white-space:pre-wrap;word-break:break-all';
-      document.body.appendChild(strip);
-    }
-    if (strip) strip.textContent = `v${SITE_VERSION} ${locked ? 'LOCK' : 'free'} hidden:${hiddenCount} ${location.pathname.slice(0, 24)}\n` + logs.slice(-3).join('\n');
-  };
+  const SITE_VERSION = '20'; // keep equal to @version above: Userscripts offers an update only when @version grows
 
   // At document-start the <html> element may not exist yet; wait for it instead of crashing
   const onRoot = (fn) => document.documentElement ? fn()
@@ -75,7 +59,9 @@
     const p = location.pathname, from = lastPath;
     lastPath = p;
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
-    if (CFG.hideSearch && p.startsWith('/explore')) { location.replace('/'); return; }
+    if (CFG.hideSearch && (p === '/explore' || p.startsWith('/explore/'))) { location.replace('/'); return; } // not /explorecanada/
+    // the full "Suggested for you" accounts page (its entry points are hidden; a typed URL or history still gets there)
+    if (CFG.hideSuggestedAccounts && /^\/explore\/people(\/|$)/.test(p)) { spaGo('/', () => true, true); return; }
     // The search tab (/explore/) is a search box over the recommended grid. With the grid hidden it is a blank
     // page whose box only opens the real search page, so the tab goes straight there: one tap to the keyboard.
     // The CSS keeps tiles hidden on both paths, for the moment before the search page replaces Explore.
@@ -91,7 +77,6 @@
     recheckLock();
     syncTabs();
     unhoverSheets(); // a new page may have brought rules (cheap: unchanged sheets are skipped)
-    log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
   const routeIfMoved = () => { if (location.href !== last) { last = location.href; route(); } };
@@ -109,7 +94,7 @@
   // re-created by the lock.
   const stop = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
   let locked = false, startY = null, blocking = false, pinTimer = null;
-  const pinned = new Map(); // reel scroll box -> scrollTop to hold it at
+  const pinned = new Map(); // reel scroll box -> { anchor: where it was pinned, top: the position held now }
   const isScrollBox = (el) => el !== document.body && el !== document.documentElement && el.clientHeight >= 300
     && el.scrollHeight >= el.clientHeight + 50 && /auto|scroll/.test(getComputedStyle(el).overflowY);
   const reelBoxOf = (video) => {
@@ -125,8 +110,8 @@
       lockSwipe(CFG.singleReelOnly && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
       if (locked) pin(); // a box that appeared while already locked is pinned now, not at the next tick
     };
-    apply();
-    recheckTimer = setTimeout(apply, 400); // once more after the overlay has laid out
+    apply(); // and again after the overlay has laid out, and once more for a slow opening animation
+    recheckTimer = setTimeout(() => { apply(); recheckTimer = setTimeout(apply, 800); }, 400);
   };
   // A reel that opens paused: Instagram calls play() after the data arrives, outside the tap that opened
   // it, and Safari refuses. Starting it ourselves from the same moment works for a muted video.
@@ -135,7 +120,7 @@
   const onScreen = (v) => { const r = v.getBoundingClientRect(); return r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
   const nudgePlay = (v) => {
     if (!CFG.autoPlayReels) return;
-    const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v) && onScreen(v)) { v.play().then(() => log('play', 'started paused reel')).catch(() => {}); } };
+    const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v) && onScreen(v)) { v.play().catch(() => { /* refused (Low Power Mode, or not ready): Instagram's own play button still works */ }); } };
     v.addEventListener('loadeddata', tryPlay, { once: true });
     setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);
   };
@@ -153,35 +138,36 @@
     return verdict;
   };
   const onStart = (e) => {
-    if (e.touches.length !== 1) return; // a second finger does not restart the gesture
+    if (e.touches.length !== e.changedTouches.length) return; // a finger joining a gesture under way does not restart it
     pin(); // the box the finger is on may have appeared since the last tick
+    verdicts = new WeakMap(); // a caption may have become scrollable (or stopped being) since the last touch
     startY = e.touches[0].clientY; blocking = shouldBlock(e.target);
   };
-  const onMove = (e) => { if (blocking) stop(e); };
+  const onMove = (e) => { if (blocking && e.touches.length === 1) stop(e); }; // two fingers: a pinch, not a swipe
   const onEnd = (e) => {
     if (e.touches.length > 0) return; // other fingers still down
     const y = e.changedTouches[0]?.clientY;
     const swipe = blocking && startY !== null && y !== undefined && Math.abs(y - startY) > 20;
     if (swipe) stop(e);
-    log('touchend', (swipe ? 'SWALLOWED(swipe) ' : blocking ? 'tap-in-reel ' : 'tap ') + describe(e.target));
     startY = null; blocking = false;
   };
   const onWheel = (e) => { if (shouldBlock(e.target)) stop(e); };
   const handlers = [['touchstart', onStart], ['touchmove', onMove], ['touchend', onEnd], ['touchcancel', onEnd], ['wheel', onWheel]];
-  // A reel-sized jump (auto-advance) or any movement while a finger is down is undone; a small
-  // programmatic adjustment with no finger down (Instagram re-centring the reel) becomes the new held position.
+  // Any movement while a finger is down is undone. With no finger down, Instagram re-centring the reel by a few
+  // pixels is kept, but nothing may stray more than a quarter of the box from where the reel was pinned, however
+  // small its steps (smooth scrolling and arrow keys move in small steps, and each used to be accepted).
   const holdScroll = (e) => {
-    const el = e.target, top = pinned.get(el);
-    if (top === undefined || el.scrollTop === top) return;
-    if (startY !== null || Math.abs(el.scrollTop - top) >= el.clientHeight * 0.5) el.scrollTop = top;
-    else pinned.set(el, el.scrollTop);
+    const el = e.target, hold = pinned.get(el);
+    if (!hold || el.scrollTop === hold.top) return;
+    if (startY === null && Math.abs(el.scrollTop - hold.anchor) < el.clientHeight * 0.25) hold.top = el.scrollTop;
+    else el.scrollTop = hold.top;
   };
   const pin = () => {
     let changed = false;
     for (const el of [...pinned.keys()]) if (!el.isConnected) { el.removeEventListener('scroll', holdScroll); pinned.delete(el); changed = true; }
     for (const v of document.querySelectorAll('video')) {
       const box = reelBoxOf(v);
-      if (box && !pinned.has(box)) { pinned.set(box, box.scrollTop); box.addEventListener('scroll', holdScroll, { passive: true }); changed = true; }
+      if (box && !pinned.has(box)) { pinned.set(box, { anchor: box.scrollTop, top: box.scrollTop }); box.addEventListener('scroll', holdScroll, { passive: true }); changed = true; }
     }
     if (changed) verdicts = new WeakMap();
   };
@@ -189,7 +175,8 @@
   const lockSwipe = (on) => {
     if (on === locked) return;
     locked = on;
-    log('lock', on ? 'ON' : 'off');
+    startY = null; blocking = false; // a touch that began under the other state must not carry over
+    document.documentElement.toggleAttribute('data-focus-locked', on); // readable by the test tools
     for (const [t, h] of handlers) document[on ? 'addEventListener' : 'removeEventListener'](t, h, { capture: true, passive: false });
     clearInterval(pinTimer);
     if (on) { pin(); pinTimer = setInterval(pin, 500); } else unpin();
@@ -199,16 +186,18 @@
   const TILES = ['/p/', '/reel/', '/reels/', '/tv/'].map((h) => `a[href*="${h}"]:not([href="/reels/"])`).join(','); // post and reel tiles
   const css = [];
   if (CFG.hideReelsFeed) css.push('a[href="/reels/"]{display:none!important}'); // exact: single-reel links stay
-  if (CFG.hideSearch) css.push('a[href^="/explore"]{display:none!important}');
+  if (CFG.hideSearch) css.push('a[href="/explore"],a[href^="/explore/"]{display:none!important}');
   // visibility, not display: the tiles keep their space, so Instagram's grid never looks empty and keeps loading more
   if (CFG.hideExplore) css.push(TILES.split(',').map((t) => `html[data-focus-explore] ${t}`).join(',') + '{visibility:hidden!important}');
   css.push('[data-focus-hidden]{display:none!important}', '[data-focus-pad]{padding-bottom:50px!important}',
     '#focus-tabbar a[aria-current] [stroke-width]{stroke-width:3}',
     // on the search pages Instagram's results list is a layer (z-index 11) that runs over its own tab bar (2), so a
     // tap on Home opened a recent search; the bar goes above it there (only there: elsewhere sheets must cover it)
-    'html[data-focus-search] [data-focus-bar]{z-index:12!important}');
+    'html[data-focus-search] [data-focus-bar]{z-index:12!important}',
+    'html[data-focus-search] body{padding-bottom:50px!important}'); // so the last result can scroll clear of the lifted bar
   css.push('*{touch-action:manipulation}'); // no double-tap zoom anywhere; Instagram's own touch-action rules still win
-  if (CFG.hideAppPrompts) css.push('a[href^="instagram://"],a[href*="apps.apple.com"],a[href^="itms-apps"]{display:none!important}');
+  // Instagram's own app only (id389801252, also inside l.instagram.com shims): App Store links people send stay
+  if (CFG.hideAppPrompts) css.push('a[href^="instagram://"],a[href*="389801252"]{display:none!important}');
   onRoot(() => {
     const style = document.createElement('style');
     style.textContent = css.join('\n');
@@ -222,15 +211,17 @@
   // (paths measured 2026-10-15) at the same place, and switch pages in place like Instagram's do.
   // Instagram renders a route when it sees a popstate (verified on the phone), so a page opens without a reload;
   // if it has not rendered 2 s later, the page is loaded normally.
+  let navSeq = 0;
   const spaGo = (path, rendered, replace = false) => {
+    const seq = ++navSeq; // a later move cancels this one's fallback
     history[replace ? 'replaceState' : 'pushState'](null, '', path);
     dispatchEvent(new PopStateEvent('popstate', { state: null }));
-    setTimeout(() => { if (location.pathname + location.search === path && !rendered()) location.replace(path); }, 2000);
+    setTimeout(() => { if (seq === navSeq && location.pathname + location.search === path && !rendered()) location.replace(path); }, 2000);
   };
   const isInbox = (p) => /^\/direct\/inbox\/?$/.test(p);
   // a tab link of Instagram's own bar: shown, along the bottom edge (a header logo also links to /)
   const nativeTab = (href) => [...document.querySelectorAll(`a[href="${href}"]:not([data-focus-tab])`)]
-    .find((a) => { const r = a.getBoundingClientRect(); return r.height > 0 && r.top > innerHeight - 100; });
+    .find((a) => { const r = a.getBoundingClientRect(); return r.height > 0 && r.top > innerHeight - 100 && getComputedStyle(a).visibility !== 'hidden'; });
   const barUp = () => !!nativeTab('/direct/inbox/'); // Messages is in Instagram's bar on every page that has one
   const scheme = () => (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   const store = (() => { try { return JSON.parse(localStorage.getItem('focusTabs')) || {}; } catch { return {}; } })();
@@ -240,6 +231,7 @@
     let fixed = home; while (fixed && getComputedStyle(fixed).position !== 'fixed') fixed = fixed.parentElement;
     if (!row || !fixed) return;
     fixed.setAttribute('data-focus-bar', '');
+    if (!CFG.inboxTabBar) return; // nothing to remember without the inbox bar
     const edge = [fixed, ...fixed.querySelectorAll('div')].find((e) => getComputedStyle(e).borderTopWidth !== '0px'); // its 1 px divider
     const next = { ...store, [scheme()]: { fg: getComputedStyle(home.querySelector('svg') || home).color, bg: getComputedStyle(fixed).backgroundColor,
       line: edge ? getComputedStyle(edge).borderTopColor : undefined } };
@@ -280,13 +272,14 @@
   const goTab = (a) => {
     const href = a.getAttribute('href');
     // profile still unknown: open Home, whose bar has the profile link, and go on from there (syncTabs)
-    if (a.hasAttribute('data-focus-unknown')) { profileWanted = performance.now(); spaGo('/', barUp); return; }
+    if (a.hasAttribute('data-focus-unknown')) { profileWanted = performance.now(); spaGo('/', barUp); return; } // then replaced
     const dest = href === '/explore/' && CFG.hideExplore ? '/explore/search/' : href;
     if (location.pathname !== dest) spaGo(dest, barUp);
   };
-  // the account name the inbox shows at the top (next to a chevron icon), for when Instagram's bar was never seen
+  // the account name the inbox shows at the top (next to a chevron icon): the signed-in account, which wins over what
+  // was remembered (another account may have used this Safari). innerText, because the icon's <title> is in textContent.
   const accountHref = () => {
-    const name = [...document.querySelectorAll('[role="button"]')].find((b) => b.querySelector('svg[aria-label*="chevron" i]'))?.textContent.trim();
+    const name = [...document.querySelectorAll('[role="button"]')].find((b) => b.querySelector('svg[aria-label*="chevron" i]'))?.innerText.trim();
     return name && /^[\w.]+$/.test(name) ? `/${name}/` : null;
   };
   const buildBar = () => {
@@ -315,7 +308,7 @@
       row.append(a);
     }
     el.append(row);
-    el.tries = 0;
+    el.builtAt = performance.now();
     return el;
   };
   // the inbox list scrolls inside its own box down to the bottom edge: pad that box so the last chat clears the bar
@@ -326,24 +319,33 @@
       if (/auto|scroll/.test(getComputedStyle(el).overflowY) && el.clientHeight >= 200) { el.setAttribute('data-focus-pad', ''); return; }
     }
   };
-  const inboxPending = () => bar?.isConnected && bar.tries < 60 && (!document.querySelector('[data-focus-pad]') || bar.querySelector('[data-focus-unknown]'));
+  // for 10 s after the bar is drawn: the inbox list box and the account name appear as the inbox renders
+  const inboxPending = () => bar?.isConnected && performance.now() - bar.builtAt < 10000 && (!document.querySelector('[data-focus-pad]') || !bar.accountChecked);
+  const phoneLayout = () => innerWidth < 768; // wider, Instagram has a side navigation instead of a bottom bar
   const syncTabs = () => {
     if (!document.body) return;
     hideSlots();
     const home = nativeTab('/');
     if (home && barUp()) learnBar(home);
     if (profileWanted && performance.now() - profileWanted > 5000) profileWanted = 0; // too late: the user has moved on
-    if (profileWanted && store.profile && barUp()) { profileWanted = 0; spaGo(store.profile, barUp); }
-    const want = CFG.inboxTabBar && isInbox(location.pathname) && !barUp();
+    if (profileWanted && store.profile && barUp()) { profileWanted = 0; spaGo(store.profile, barUp, true); } // Back skips Home
+    const want = CFG.inboxTabBar && phoneLayout() && isInbox(location.pathname) && !barUp();
     if (want && !bar?.isConnected) document.body.append(bar = buildBar());
     if (!want && bar?.isConnected) { bar.remove(); for (const e of document.querySelectorAll('[data-focus-pad]')) e.removeAttribute('data-focus-pad'); }
     if (!want || !inboxPending()) return;
-    // the inbox renders after the bar may be up: its list box and account name are picked up as they appear
-    bar.tries++;
     padInbox();
-    const unknown = bar.querySelector('[data-focus-unknown]'), href = unknown && accountHref();
-    if (href) { unknown.setAttribute('href', href); unknown.removeAttribute('data-focus-unknown'); }
+    const account = accountHref(), tab = bar.querySelector('[aria-label="Profile"]');
+    if (!account) return;
+    bar.accountChecked = true;
+    if (tab.getAttribute('href') === account) return;
+    tab.setAttribute('href', account); tab.removeAttribute('data-focus-unknown');
+    if (store.profile !== account) tab.replaceChildren(icon(ICONS.profile, 'Profile')); // not the remembered account's picture
   };
+  // switching light/dark with the inbox open: redraw the bar in the other scheme's colours
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (!bar?.isConnected) return;
+    const fresh = buildBar(); bar.replaceWith(fresh); bar = fresh;
+  });
   const TAB_LINKS = 'a[href="/"], a[href="/reels/"], a[href="/explore/"], a[href="/direct/inbox/"]';
   const touchesTabs = (n) => n.nodeType === 1 && !n.closest?.('#focus-tabbar') && (n.matches(TAB_LINKS) || !!n.querySelector(TAB_LINKS) || !!n.closest?.(TAB_LINKS));
 
@@ -355,15 +357,22 @@
   // is the accounts carousel, where the largest wrapper holding no post is hidden. Anywhere else a stray
   // label hides nothing, so a page can never go blank.
   const LEAF = 'span, h2, h3, h4, div, button, a';
-  const sponsoredWords = [...(CFG.hideSponsored ? WORDS.sponsored : []), ...(CFG.hidePaidPartnership ? WORDS.partnership : [])];
-  const isOffsiteLink = (a) => !!a && /l\.instagram\.com|^https?:\/\/(?!(www\.)?instagram\.com\/)/.test(a.href);
-  const hide = (node, why) => {
-    if (!node || node === document.body || node === document.documentElement || node.style.display === 'none') return;
-    node.style.display = 'none'; hiddenCount++;
-    log('hide', (why || '') + ' ' + node.tagName.toLowerCase() + ' h=' + node.clientHeight);
+  // the ad label is the word alone or followed by a separator ("Sponsored · 2h"); "Sponsored by my mom" is a caption
+  const isAdLabel = (t) => (CFG.hideSponsored && WORDS.sponsored.some((w) => t === w || (t.startsWith(w) && /^\s*[·•|]/.test(t.slice(w.length)))))
+    || (CFG.hidePaidPartnership && WORDS.partnership.some((w) => t.startsWith(w)));
+  // off-site: Instagram's link shim, or any host outside Instagram / Facebook / Meta (help pages are not ads)
+  const isOffsiteLink = (a) => {
+    let host; try { host = new URL(a.href).hostname; } catch { return false; } // no link, or not a URL: not off-site
+    return host === 'l.instagram.com' || !/(^|\.)(instagram|facebook|meta|fb)\.com$/.test(host);
   };
+  const hide = (node) => {
+    if (!node || node === document.body || node === document.documentElement || node.style.display === 'none') return;
+    node.style.display = 'none';
+  };
+  const LATER = {}; // carouselOf: no post on the page yet, decide once there is one
   const carouselOf = (el) => {
     if (location.pathname !== '/') return null;
+    if (!document.querySelector('main article')) return LATER; // the climb would stop nowhere and take the column
     let node = el, best = el;
     while (node.parentElement && node.parentElement !== document.body && !/^(MAIN|SECTION)$/.test(node.parentElement.tagName)) {
       node = node.parentElement;
@@ -389,8 +398,8 @@
       anchor = anchor.parentElement;
     }
     if (!anchor.nextElementSibling || !isFollowBlock(anchor.nextElementSibling)) return; // not the block's heading
-    hide(head, 'suggested-heading');
-    for (let n = anchor.nextElementSibling; n && isFollowBlock(n); n = n.nextElementSibling) hide(n, 'suggested-accounts');
+    hide(head);
+    for (let n = anchor.nextElementSibling; n && isFollowBlock(n); n = n.nextElementSibling) hide(n);
   };
   const onNotifs = () => CFG.hideSuggestedAccounts && location.pathname.startsWith('/notifications');
   let notifTimer = null, notifFirst = 0;
@@ -403,7 +412,7 @@
       notifTimer = null;
       if (!onNotifs()) return; // left the page meanwhile
       for (const h of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
-        if (WORDS.suggested.includes(h.textContent.trim()) && h.checkVisibility?.() !== false) hideNotifSuggestions(h);
+        if (WORDS.suggested.includes(h.textContent.trim())) hideNotifSuggestions(h); // hidden ones too: late blocks after them
       }
     }, 300);
   };
@@ -412,12 +421,12 @@
     const t = el.textContent.trim();
     if (!t || t.length > 40) return;
     const post = el.closest('article');
-    if (sponsoredWords.some((w) => t.startsWith(w))) hide(post, 'ad:' + t.slice(0, 12)); // "Sponsored · 2h"
+    if (isAdLabel(t)) hide(post);
     // an ad's call-to-action is an off-site link (through l.instagram.com); an organic "Learn more" overlay is not
-    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && isOffsiteLink(el.closest('a[href]'))) hide(post, 'cta:' + t.slice(0, 12));
+    else if (CFG.hideSponsored && post && WORDS.cta.includes(t) && el.closest('a[href]') && isOffsiteLink(el.closest('a[href]'))) hide(post);
     else if (WORDS.suggested.includes(t)) {
-      if (post) { if (CFG.hideSuggestedPosts) hide(post, 'suggested-post'); }
-      else if (CFG.hideSuggestedAccounts) hide(carouselOf(el), 'suggested-accounts');
+      if (post) { if (CFG.hideSuggestedPosts) hide(post); }
+      else if (CFG.hideSuggestedAccounts) { const unit = carouselOf(el); if (unit === LATER) pending.add(el); else hide(unit); }
     }
     // a dialog whose button says "Use the app" is the app prompt itself; in the header only the button goes
     else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el, 'app-prompt');
@@ -430,16 +439,17 @@
   const isBannerMeta = (n) => n.nodeName === 'META' && n.getAttribute('name') === 'apple-itunes-app';
   const pending = new Set();
   let flushTimer = null;
-  const flush = () => { flushTimer = null; for (const n of pending) scan(n); pending.clear(); };
+  // swap first: a check may queue its node again (a carousel waiting for the first post), for a later flush
+  const flush = () => { flushTimer = null; const batch = [...pending]; pending.clear(); for (const n of batch) scan(n); };
   let sheetCount = 0;
   const onMutations = (muts) => {
     routeIfMoved();
-    let tabsChanged = false;
+    let tabsChanged = false, videoChange = false;
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }
-      let videoChange = false;
       for (const n of m.addedNodes) {
+        if (n.nodeType === 3) { if (n.parentElement) pending.add(n.parentElement); continue; } // a label's text arriving late
         if (n.nodeType !== 1) continue;
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
@@ -453,8 +463,8 @@
         if (n.tagName === 'VIDEO' || n.querySelector?.('video')) videoChange = true;
         if (!tabsChanged && touchesTabs(n)) tabsChanged = true; // Instagram's bar going away (the inbox)
       }
-      if (videoChange) recheckLock();
     }
+    if (videoChange) recheckLock();
     if (tabsChanged || inboxPending()) syncTabs();
     if (onNotifs()) notifPass();
     if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
@@ -464,49 +474,52 @@
   // :hover on what the finger touched. If that makes something appear, the tap counts as a hover and only the next
   // tap clicks. Instagram's web app reveals desktop hover extras both ways (measured on the phone 2026-10-15: a DM
   // message row shows React / Reply / More from a mouseover handler and from :hover rules, opacity 0 -> 1), so a post
-  // shared in a DM needed two taps. So: hover events from a finger never reach Instagram's handlers (registered first,
-  // on window, capture phase). That includes out/leave: React dispatches onMouseEnter from the PREVIOUS element's
-  // mouseout (its relatedTarget), and iOS keeps the last tapped element hovered, so every tap after the first would
-  // still reveal. Pen pointer events are treated as a finger; a real mouse (iPad pointer) still hovers. And on a device
-  // where nothing can hover, every :hover in Instagram's stylesheets is rewritten never to match: the page then
-  // behaves as if nothing were ever hovered, :not(:hover) and :has(:hover) included.
+  // shared in a DM needed two taps. So: a finger's hover events never reach Instagram's handlers (registered first,
+  // on window, capture phase) when the hover lands on something that opens: a link, a button, or anything Instagram
+  // marks clickable (cursor: pointer). That includes out/leave, judged by where the hover moves to: React dispatches
+  // onMouseEnter from the PREVIOUS element's mouseout (its relatedTarget), and iOS keeps the last tapped element
+  // hovered. A tap on a plain DM text bubble keeps its hover, so React / Reply / More stay reachable. Pen pointer
+  // events count as a finger; a real mouse (iPad pointer) still hovers. And on a device where nothing can hover, every
+  // :hover in Instagram's stylesheets is rewritten never to match: the page behaves as if nothing were ever hovered,
+  // :not(:hover) and :has(:hover) included.
   let unhoverSheets = () => {};
   if (CFG.oneTap) {
     let fingerAt = -Infinity;
-    for (const t of ['touchstart', 'touchend']) addEventListener(t, () => { fingerAt = performance.now(); }, { capture: true, passive: true });
+    for (const t of ['touchstart', 'touchend']) addEventListener(t, () => { fingerAt = performance.now(); unhoverSheets(); }, { capture: true, passive: true });
     addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') fingerAt = -Infinity; }, { capture: true, passive: true });
     const fromFinger = (e) => (e.pointerType ? e.pointerType !== 'mouse' : performance.now() - fingerAt < 1000);
+    const OPENS = 'a[href], button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input, select, textarea, label, summary';
+    const opens = (el) => el instanceof Element && (!!el.closest(OPENS) || getComputedStyle(el).cursor === 'pointer');
+    const onto = (e) => (/out|leave/.test(e.type) ? e.relatedTarget : e.target); // where the hover is moving to
     for (const t of ['pointerover', 'pointerenter', 'pointerout', 'pointerleave', 'mouseover', 'mouseenter', 'mouseout', 'mouseleave', 'mousemove']) {
-      addEventListener(t, (e) => { if (fromFinger(e)) e.stopImmediatePropagation(); }, true);
+      addEventListener(t, (e) => { if (fromFinger(e) && opens(onto(e))) e.stopImmediatePropagation(); }, true);
     }
     if (matchMedia('(any-hover: none)').matches) {
       const seen = new WeakMap(); // sheet -> rule count when last rewritten (278 :hover rules among ~19k, ~20 ms once)
-      const LIVE_HOVER = /:hover(?!:not\(\*\))/g;
+      const LIVE = /:hover(?!:not\(\*\))/, LIVE_ALL = /:hover(?!:not\(\*\))/g; // not yet rewritten
       const unhover = (rules) => {
         for (const r of rules) {
           if (r.cssRules?.length) unhover(r.cssRules);
-          const sel = r.selectorText;
-          if (sel && LIVE_HOVER.test(sel)) { LIVE_HOVER.lastIndex = 0; r.selectorText = sel.replace(LIVE_HOVER, ':hover:not(*)'); }
-          LIVE_HOVER.lastIndex = 0;
+          if (r.selectorText && LIVE.test(r.selectorText)) r.selectorText = r.selectorText.replace(LIVE_ALL, ':hover:not(*)');
         }
       };
       unhoverSheets = () => {
         for (const sh of document.styleSheets) {
+          if (seen.get(sh) === -1) continue; // another origin's, never readable
           try {
             if (seen.get(sh) === sh.cssRules.length) continue; // unchanged since its last pass (rules added later are caught)
             unhover(sh.cssRules); seen.set(sh, sh.cssRules.length);
           } catch (err) {
-            if (err.name === 'SecurityError') seen.set(sh, -1); // another origin's, never readable: not retried
-            log('css', `stylesheet not rewritten: ${err.name}`); // InvalidAccessError = still loading, retried next time
+            if (err.name === 'SecurityError') seen.set(sh, -1);
+            // otherwise (InvalidAccessError) the sheet is still loading: rewritten on a later pass
           }
         }
       };
-      addEventListener('load', (e) => { if (e.target instanceof HTMLLinkElement) unhoverSheets(); }, true); // a stylesheet arrived
+      // a <link> stylesheet arrived (load does not reach window, so on document, capture phase)
+      document.addEventListener('load', (e) => { if (e.target instanceof HTMLLinkElement) unhoverSheets(); }, true);
     }
   }
 
-  // every tap, logged when debugging (capture phase, so it is seen even if Instagram stops propagation)
-  if (DEBUG) onRoot(() => document.addEventListener('click', (e) => log('click', describe(e.target)), true));
   onRoot(() => new MutationObserver(onMutations).observe(document.documentElement,
     { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['name'] }));
   const initial = () => { scan(document.documentElement); unhoverSheets(); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(); };

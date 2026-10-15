@@ -1,16 +1,13 @@
 # Project status
 
-**2026-10-15: v19 on the iPhone, master pushed, not tagged.** Last tagged release: v0.2 (= v15).
+**2026-10-15: v20 on the branch `feature/public-release`, waiting for one check on the phone.** Released: v0.2 (= v15).
+v19 was tried on the phone and judged right ("it's perfect"); v20 is v19 plus the fixes from the final review.
 
-Working on the phone (DEVICE PASS + screenshots): four evenly spaced tabs everywhere incl. the DM inbox, one-tap
-search tab, search results and reels from them single-reel, DM reel overlay locked and autoplaying, notifications
-without suggested accounts, cold loads of inbox and Explore.
+To do before v0.3: plug the phone in, push v20, `sim/checkall.sh` must pass, then by hand: a DM text bubble shows
+React / Reply / More on one tap, a shared post still opens on one tap. Then merge to master, tag v0.3, copy to
+`releases/`.
 
-Waiting on the user's thumb: the one-tap fix for posts shared in DMs (v19). Synthetic events and the real React
-app confirm the mechanism; only a real finger proves it.
+Known limits (see the brief): English and French labels only; iPad, desktop and landscape not targeted; the
+pre-v0.3 git history has a DM thread id and a few rule-breaking commits that would need a force-push to clean.
 
-Next: user verdict on v19; if clean, tag v0.3 (copy to `releases/`), strip the DEBUG code, write a friends'
-install guide in the README.
-
-Known limits: light mode and on-device timing not measured on the phone (harness only); an iPad with a pointer keeps
-CSS `:hover` on purpose.
+Not decided: a license (none yet, so the code is visible but not reusable).

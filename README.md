@@ -1,42 +1,74 @@
 # insta-safari: Instagram Focus
 
-A Safari userscript that makes instagram.com usable on an iPhone without the attention traps: no Reels feed or tab, no Explore grid (search stays: the box, results, hashtag and place pages), no ads, no "Suggested for you" accounts (home carousel, notifications list), no "open the app" prompts, four evenly spaced tabs at the bottom (Home, Search, Messages, Profile) that stay on the DM inbox, the Search tab one tap from the keyboard, one tap to open a post (no hover-first double tap), and a reel someone sends you (as a page or as the DM overlay) or one you open from search opens, is started if Safari left it paused, but cannot be swiped into the next one. Recommended posts, the Explore grid, the whole search tab, the inbox tab bar, one-tap (no hover first) and the Following feed are toggles (`hideSuggestedPosts`, `hideExplore`, `hideSearch`, `inboxTabBar`, `oneTap`, `followingFeed`). Runs in Safari through the free, open-source **Userscripts** app. Nothing is installed outside the App Store; the login never leaves Safari and Meta.
+A Safari userscript that makes instagram.com usable on an iPhone without the attention traps. It runs in Safari through the free, open-source **Userscripts** app. Nothing else gets installed, and your login never leaves Safari and Meta.
+
+What it does, out of the box:
+
+- No Reels tab and no endless Reels feed. A reel someone sends you still opens (as a page or as the DM overlay), starts playing if Safari left it paused, and can't be swiped into the next one. Same for a reel you open from search.
+- Search stays, the Explore grid goes. The Search tab lands straight on the search box (one tap to the keyboard); results, hashtags and places all work.
+- No ads, no "Suggested for you" accounts (the home carousel and the list at the bottom of notifications), no "open the app" prompts.
+- Four evenly spaced tabs at the bottom (Home, Search, Messages, Profile), and they stay on the DM inbox, where Instagram shows none.
+- One tap opens things. Safari treats a tap as a hover first, and Instagram's hover extras made some taps (a post shared in a DM) need a second one.
+
+Recommended posts in the feed are kept (the feed is mostly those once you're caught up). Every behaviour is a line in `CFG` at the top of the script, except two small layout fixes that are always on: no double-tap zoom, and the tab bar sitting above the search results.
+
+**Limits.** Ads, suggestions and app prompts are found by their visible label, in English and French only. With Instagram in another language those stay; everything else works. Built and tested for iPhone Safari in portrait; on an iPad or a computer it mostly works, but the tab-bar parts are phone-only.
+
+## Install on your iPhone (5 minutes)
+
+1. Install **Userscripts** from the App Store. Open it once and pick a folder for your scripts (for example *On My iPhone › Userscripts*).
+2. Turn the extension on: *Settings › Apps › Safari › Extensions › Userscripts*, on, and allow it on `instagram.com` (or All Websites).
+3. In Safari, open <https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js>. Tap the extensions icon in the address bar (the puzzle piece, or **ᴀA**), then **Userscripts**, then **Install**.
+4. **Type** `instagram.com` into Safari's address bar and log in. (Tapping an instagram.com link opens the Instagram app instead, where extensions never run.) If Userscripts asks for permission on the site, choose *Always Allow*. The Reels tab is gone and four evenly spaced tabs remain: it works.
+5. Optional Home Screen icon: *Share › Add to Home Screen* with **Open as Web App turned off**. A web app opens outside Safari, and extensions don't run there.
+
+**Updating.** In Safari's extensions menu, *Userscripts › Check for updates*, or repeat step 3. `master` only gets versions that were checked on a phone first.
+
+**Changing a setting.** The iPhone Userscripts app has no editor, so open the script file from step 1 in a text editor app (from Files), flip the line in `CFG`, and save. An update replaces the file, so note your changes and redo them after updating.
+
+**Copying the file in yourself** instead of step 3 works too, but open the Userscripts menu in Safari once afterwards: it only picks up new files then.
+
+**Uninstall.** Delete the script in the Userscripts app.
+
+**Privacy.** The script only rearranges and hides parts of the page in your own Safari. It sends nothing anywhere and has no analytics. It keeps three things in Instagram's own storage on your phone, to draw the tab bar on the DM inbox: your profile link, your profile-picture address and the tab-bar colours.
 
 ## Files
 
 | Path | What |
 |---|---|
-| `instagram-focus.user.js` | the script; every behaviour is a toggle in `CFG` at the top |
-| `releases/instagram-focus-v0.1.user.js`, `-v0.2.user.js` | tagged releases (`v0.1` first live version; `v0.2` after the review and the screenshot-driven fixes) |
-| `sim/check.js`, `sim/app.html`, `sim/server.py` | headless-Chromium harness: S0-S23 real-use scenarios against a model of Instagram's mobile site, its tab bar, inbox and search page as measured on the phone (`node sim/check.js`, ~60 s) |
-| `sim/device_check.py`, `sim/checkall.sh` | the same tab-bar, inbox and search checks on the real iPhone; `checkall.sh` runs harness + phone and exits 0 only when both pass |
+| `instagram-focus.user.js` | the script; settings in `CFG` at the top |
+| `releases/` | tagged releases: `v0.1` first live version, `v0.2` after the first review, `v0.3` search back, four even tabs everywhere, one tap per action |
+| `sim/check.js`, `sim/app.html`, `sim/server.py` | headless-Chromium test harness: scenarios S0 to S29 against a model of Instagram's mobile site (tab bar, inbox, search page, DM messages), built from measurements on a real phone (`node sim/check.js`, about a minute) |
+| `sim/device_check.py`, `sim/checkall.sh` | the tab-bar, inbox and search checks on a real iPhone; `checkall.sh` runs the harness and the phone and exits 0 only when both pass |
 | `sim/probe.py`, `sim/evaljs.py` | a real screenshot of the phone's tab (Web Inspector `Page.snapshotRect`) with the tab-bar layout; run a JS file in the tab |
-| `sim/device-attach.sh` | hands the iPhone from Windows to WSL (usbipd-win) and starts the device daemon cleanly |
-| `sim/pages.py` | on-device checker: is the script active in a real Safari tab (not a Home Screen web app)? |
-| `sim/_device.py` | shared connect / tab-pick / evaluate helpers for the on-device scripts |
+| `sim/device-attach.sh` | hands the iPhone from Windows to WSL (usbipd-win) |
+| `sim/pages.py` | is the repo's version running in a real Safari tab (not a Home Screen web app)? |
+| `sim/_device.py` | shared connect / tab-pick / evaluate helpers for the phone scripts |
 | `sim/reload_all.py` | reloads every open Instagram tab so it picks up a freshly pushed script |
-| `sim/verify_search.py` | drives a tab through the search tab, the search box, a typed query, keyword and hashtag pages, reporting visible inputs, result links and shown/hidden tiles |
-| `sim/verify_lock.py` | drives a tab through feed, reel page, wheel and in-page navigation, reading the installed script's state |
+| `sim/verify_search.py`, `sim/verify_lock.py` | walk a tab through search, or through feed, reel page and in-page navigation, and print what the script did |
+| `sim/jank.py` | scroll smoothness on the phone, with and without the script |
+| `sim/icon.js` | renders a Home Screen icon PNG locally (not kept in the repo) |
+| `docs/` | brief, architecture, status, changelog |
+| `loop/` | the research table of other ways to tame Instagram and YouTube on iOS that led to this project |
 
 ## Workflow
 
-1. Edit `instagram-focus.user.js`; bump `SITE_VERSION` (readable on the device as `document.documentElement.dataset.focusVersion`).
-2. `node sim/check.js` must print `ALL PASS`.
+1. Work on a branch. Edit `instagram-focus.user.js` and bump both `@version` in the header and `SITE_VERSION` (the harness fails if they differ; Userscripts only offers an update when `@version` grows).
+2. `node sim/check.js` prints `ALL PASS`.
 3. Phone plugged in, unlocked, Safari in front: `sim/device-attach.sh`, then
    `USBMUXD_SOCKET_ADDRESS=/var/run/usbmuxd .venv/bin/pymobiledevice3 apps push --documents com.userscripts.macos instagram-focus.user.js /Documents/instagram-focus.user.js`
-4. `USBMUXD_SOCKET_ADDRESS=/var/run/usbmuxd .venv/bin/python sim/pages.py` → `PASS` once a fresh Safari tab reports the new version.
-5. Commit; tag releases.
+4. `sim/checkall.sh` exits 0 (harness and phone).
+5. Merge to `master`, tag, copy the script into `releases/`.
 
-Rollback: `git checkout v0.1 -- instagram-focus.user.js`, then step 3.
-
-`v0.1` is the snapshot the user approved on the phone, not a green build: its checker fails scenario 12 (comments on a reel), fixed in v0.2.
+Rollback: `git checkout v0.2 -- instagram-focus.user.js`, then step 3.
 
 ## Things learned on the device (iOS 26.6.1)
 
-- A Home Screen icon opens as a standalone web app by default on iOS 26; Safari extensions never run there. Add the icon with "Open as Web App" off, or, with another default browser, use a Shortcut that opens `x-safari-https://www.instagram.com/?variant=following`.
-- Userscripts shows "version null" until its per-site prompt is accepted in the tab; a hand injection working while the extension is silent means permission, not code.
-- `/reel/ID` is a standalone single-video page; `/reels/ID` is the endless feed scroller. Both get the lock.
-- Never start `usbmuxd` by hand: Ubuntu's socket-activated one (systemd/udev) grabs the phone on its own, and two daemons fighting for the interface (`LIBUSB_ERROR_BUSY`) was what made the USB link die after a session or two all afternoon. `sim/device-attach.sh` only does the usbipd hand-off now.
-- Page-level probes (Web Inspector `Runtime.evaluate`) stall while the phone is locked; file transfers (AFC) still work locked. Keep the screen on during probes.
-- `?variant=following` is honoured; the nav links are exactly `/reels/`, `/explore/`, `/direct/inbox/`.
-- No ad has appeared in the Following feed during any probe, so the ad label text is unverified; the script matches Sponsored / Sponsorisé / Commandité / Publicité and ad call-to-action buttons.
+- A Home Screen icon opens as a standalone web app by default on iOS 26, and Safari extensions never run there. Add the icon with "Open as Web App" off, or, with another default browser, use a Shortcut that opens `x-safari-https://www.instagram.com/`.
+- Userscripts shows "version null" until its per-site prompt is accepted in the tab. A hand injection working while the extension stays silent means permission, not code.
+- `/reel/ID` is a standalone single-video page; `/reels/ID` is the endless feed scroller. Both get the lock. Search results and profile grids open videos as single pages (`/p/ID`, `/user/reel/ID`).
+- Instagram's router renders a route on a `popstate` event, so the script can switch tabs without a reload.
+- On the search page Instagram's results list sits in a layer above its own tab bar, and DM message rows reveal React / Reply / More on hover, through both a hover handler and `:hover` CSS. Both cost taps on a phone.
+- Never start `usbmuxd` by hand: Ubuntu's socket-activated one grabs the phone by itself, and two daemons fighting over the interface (`LIBUSB_ERROR_BUSY`) kill the USB link.
+- Web Inspector probes stall while the phone is locked; file transfers still work. A probe that hangs the page can drop the USB link; re-attach after any timeout.
+- No ad has shown up in the Following feed during any probe, so the ad label text is matched from what Instagram is known to use (Sponsored, Sponsorisé, Commandité, Publicité) plus ad links that leave Instagram.

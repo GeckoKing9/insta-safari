@@ -6,8 +6,7 @@ from _device import inspector, instagram_pages, session, ev, out, STATE
 
 HOME = "https://www.instagram.com/?variant=following"
 REEL = "https://www.instagram.com/reels/DecwfGcyRn9/"
-REEL_STATE = STATE.replace("bigVideo:", """pinnedBoxes: (() => { const o = []; for (const v of vids) for (let el = v.parentElement, i = 0; el && i < 25; el = el.parentElement, i++) { if (el.clientHeight >= 300 && el.scrollHeight >= el.clientHeight + 50 && /auto|scroll/.test(getComputedStyle(el).overflowY)) { o.push(el.tagName + ' h=' + el.clientHeight + ' sh=' + el.scrollHeight + ' top=' + el.scrollTop); break; } } return [...new Set(o)]; })(),
-    bigVideo:""")
+REEL_STATE = STATE  # carries "locked": the script's own data-focus-locked flag
 
 async def main():
     async with inspector() as insp:

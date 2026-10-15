@@ -3,14 +3,14 @@
 typing, Enter), then a keyword results page and a hashtag page, reading what is visible at each step:
 the search box, result links, and how many post/reel tiles are shown vs hidden (no injection of the script)."""
 import asyncio
-from _device import inspector, instagram_pages, session, ev, out
+from _device import inspector, instagram_pages, session, ev, out, TILES
 
 HOME = "https://www.instagram.com/"
 KEYWORD = "https://www.instagram.com/explore/search/keyword/?q=cats"
 TAG = "https://www.instagram.com/explore/tags/cats/"
-SEARCH_STATE = r"""JSON.stringify((() => {
+SEARCH_STATE = (r"""JSON.stringify((() => {
   const shown = (e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none';
-  const tiles = [...document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')];
+  const tiles = [...document.querySelectorAll('%s')];
   return {
     url: location.href,
     version: document.documentElement.dataset.focusVersion || null,
@@ -23,7 +23,7 @@ SEARCH_STATE = r"""JSON.stringify((() => {
     otherLinks: [...document.querySelectorAll('main a[href], [role="dialog"] a[href]')].filter(shown)
       .map((a) => a.getAttribute('href')).filter((h) => !/\/(p|reel)\//.test(h)).slice(0, 8),
   };
-})())"""
+})())""" % TILES)
 CLICK_SEARCH_TAB = """(() => { const a = [...document.querySelectorAll('a[href="/explore/"]')].find((e) => e.getClientRects().length); if (!a) return 'no search tab link'; a.click(); return 'clicked'; })()"""
 FOCUS_BOX = """(() => {
   const i = [...document.querySelectorAll('input')].find((e) => e.getClientRects().length);

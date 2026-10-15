@@ -2,11 +2,8 @@
 """On-device checker for the tab bar, the DM inbox bar, the search tab and double-tap zoom, on the first Instagram
 Safari tab. Moves only by in-page navigation (one inspector session), prints one FAIL line per failing item and
 exits 0 only when there are none. Phone unlocked, Safari in front, logged in."""
-import asyncio, json, re, sys
-from pathlib import Path
-from _device import inspector, instagram_pages, session, ev
-
-WANT_VERSION = re.search(r"SITE_VERSION = '(\d+)'", (Path(__file__).parent.parent / "instagram-focus.user.js").read_text()).group(1)
+import asyncio, json, sys
+from _device import inspector, instagram_pages, session, ev, REPO_VERSION as WANT_VERSION, TILES
 fails = []
 def fail(item, why): fails.append(f"FAIL {item}: {why}"); print(fails[-1], flush=True)
 
@@ -19,14 +16,13 @@ TABS = r"""JSON.stringify([...document.querySelectorAll('a[href]')].filter((a) =
 RESEED = "window.__focusDoc = Math.random()"
 GO = """(() => { history.pushState(null, '', '%s'); dispatchEvent(new PopStateEvent('popstate', { state: null })); return 'ok'; })()"""
 TAP_TAB = """(() => { const a = [...document.querySelectorAll('a[href="%s"]')].find((e) => e.getBoundingClientRect().top >= innerHeight - 60); if (!a) return 'none'; a.click(); return 'tapped'; })()"""
-STATE = r"""JSON.stringify({ url: location.pathname, doc: window.__focusDoc, v: document.documentElement.dataset.focusVersion,
+STATE = (r"""JSON.stringify({ url: location.pathname, doc: window.__focusDoc, v: document.documentElement.dataset.focusVersion,
   inputs: [...document.querySelectorAll('input')].filter((e) => e.getClientRects().length).length,
-  tiles: [...document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')].filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').length,
-  touch: [document.documentElement, document.body, document.querySelector('main a, article a')].filter(Boolean).map((e) => getComputedStyle(e).touchAction) })"""
+  tiles: [...document.querySelectorAll('%s')].filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').length,
+  touch: [document.documentElement, document.body, document.querySelector('main a, article a')].filter(Boolean).map((e) => getComputedStyle(e).touchAction) })""" % TILES)
 INBOX_CLEAR = r"""JSON.stringify((() => {
-  const box = [...document.querySelectorAll('div')].filter((e) => /auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 20)
-    .sort((a, b) => b.clientHeight - a.clientHeight)[0];
-  if (!box) return { err: 'no inbox scroller' };
+  const box = document.querySelector('[data-focus-pad]'); // the list box the script padded
+  if (!box) return { err: 'no padded inbox list (data-focus-pad)' };
   box.scrollTop = box.scrollHeight;
   const rows = [...box.querySelectorAll('[role="button"], [role="link"], a')].filter((e) => { const r = e.getBoundingClientRect(); return r.height >= 50 && r.height <= 110 && r.width > innerWidth * 0.7; });
   const last = rows[rows.length - 1]?.getBoundingClientRect();
@@ -63,6 +59,7 @@ async def main():
         await ev(s, "window.__focusDoc = window.__focusDoc || Math.random(); 'ok'")  # lost on a reload, kept by in-page moves
         await ev(s, GO % "/"); await asyncio.sleep(4)
         st = await ev(s, STATE)
+        if st.get("error"): print(f"FAIL setup: {st['error']}"); sys.exit(1)
         if st.get("v") != WANT_VERSION: fail("version", f"phone runs v{st.get('v')}, repo is v{WANT_VERSION} (push + reload first)")
         doc = st.get("doc")
         t, meta = await tabs(s)

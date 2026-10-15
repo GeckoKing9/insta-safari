@@ -270,6 +270,15 @@ async function main() {
       if (bg !== 'rgb(255, 255, 255)') fail('S21c', `light-mode inbox bar background is ${bg}, expected the light default`);
       await ctx.close();
     }
+    // S23 notifications: the suggested-accounts block at the end (heading, accounts, "See All") is hidden like the
+    // home carousel; activity rows stay, including one with its own Follow button
+    for (const [lang, layout] of [['en', 'flat'], ['fr', 'flat'], ['en', 'nested']]) {
+      const { ctx, page } = await newPage(browser, { storage: { lang, notifLayout: layout } });
+      await page.goto(BASE + '/notifications/'); await sleep(1300); // the list lands 400 ms after its heading
+      for (const id of ['n1', 'n2']) if (!(await visible(page, '#' + id))) fail('S23', `${lang}/${layout}: activity row #${id} hidden`);
+      for (const id of ['shead', 'slist', 'sall']) if (await visible(page, '#' + id)) fail('S23', `${lang}/${layout}: suggested-accounts part #${id} visible`);
+      await ctx.close();
+    }
     // S22 a double tap never zooms the page: touch-action manipulation on the page and on links
     {
       const { ctx, page } = await newPage(browser);

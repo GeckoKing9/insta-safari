@@ -27,9 +27,11 @@
   const T = fr ? {
     sponsored: 'Sponsorisé', suggested: 'Suggestions pour vous', suggestedPosts: 'Publications suggérées',
     openApp: "Ouvrir l'application", useApp: "Utiliser l'application", getApp: "Télécharger l'application",
+    follow: 'Suivre', thisWeek: 'Cette semaine', seeAll: 'Voir toutes les suggestions',
   } : {
     sponsored: 'Sponsored', suggested: 'Suggested for you', suggestedPosts: 'Suggested posts',
     openApp: 'Open app', useApp: 'Use the app', getApp: 'Get the app',
+    follow: 'Follow', thisWeek: 'This week', seeAll: 'See All Suggestions',
   };
   window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
   window.__doc = Math.random(); // survives in-page navigation, lost on a full reload
@@ -115,6 +117,25 @@
       return `<main id="reel"><div id="viewer"><div class="slide"><video id="v" muted playsinline></video><div>reel ${id}</div>
         <button id="like">Like</button></div><div class="slide">next reel</div></div><div id="comments">${'<p>comment</p>'.repeat(30)}</div></main>`;
     },
+    // notifications (structure measured on the phone): activity sections, then at the end a "Suggested for you"
+    // heading, a list of accounts with Follow buttons (one row's reason line also says "Suggested for you") and a
+    // "See All Suggestions" link to /explore/people/; an activity row can have a Follow button too
+    // notifLayout=nested: the heading sits inside the activity block (rows show "Following", no Follow button),
+    // the account list is that block's sibling; nothing above the heading's own wrappers may be hidden
+    notifications() {
+      const rows = `<div><span>${T.thisWeek}</span></div><div id="n1"><span>marie liked your post</span></div>`;
+      if (localStorage.getItem('notifLayout') === 'nested') return `${nav()}<main id="notifs"><div id="nlist"><div id="act">${rows}
+        <div id="n2"><span>paul started following you</span><div role="button">Following</div></div><div id="shead"><h4>${T.suggested}</h4></div></div></div></main>`;
+      return `${nav()}<main id="notifs"><div id="nlist">${rows}
+        <div id="n2"><span>paul started following you</span><div role="button">${T.follow}</div></div>
+        <div id="shead"><h4>${T.suggested}</h4></div></div></main>`;
+    },
+    // the account list arrives after its heading, as on the phone
+    notificationsLate() {
+      document.getElementById('nlist')?.insertAdjacentHTML('beforeend', `<div id="slist"><div><span>acc1</span><span>${T.suggested}</span><div role="button">${T.follow}</div></div>
+          <div><span>acc2</span><span>Followed by x</span><div role="button">${T.follow}</div></div></div>
+        <div id="sall"><a data-spa href="/explore/people/">${T.seeAll}</a></div>`);
+    },
     other() { return `${nav()}<main id="other">page</main>`; },
   };
 
@@ -131,6 +152,7 @@
     else if (/^\/(?:[^/]+\/)?reels?\/([^/]+)/.test(p)) html = views.reel(RegExp.$1);
     else if (p === '/direct/inbox/') html = views.inbox();
     else if (p.startsWith('/direct/t/')) html = views.dm();
+    else if (p.startsWith('/notifications')) { html = views.notifications(); setTimeout(views.notificationsLate, 400); }
     else html = views.other();
     document.getElementById('root').innerHTML = html;
     wire();

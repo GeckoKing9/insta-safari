@@ -15,7 +15,7 @@
     hideSearch: false,          // the whole search tab and every /explore/ page (the v15 behaviour)
     hideSponsored: true,        // ads in the feed
     hidePaidPartnership: false, // creators' "Paid partnership" posts (not Instagram ads)
-    hideSuggestedAccounts: true, // the "Suggested for you" accounts carousel in the home feed
+    hideSuggestedAccounts: true, // the "Suggested for you" accounts: the carousel in the home feed, the list under notifications
     hideSuggestedPosts: false,  // recommended posts in the home feed (the feed is mostly these once you're caught up)
     followingFeed: false,       // open the Following feed instead of Home
     hideAppPrompts: true,       // "Open in app" banners, App Store links, Safari's Smart App Banner
@@ -27,12 +27,13 @@
     cta: ['Shop now', 'Learn more', 'Install now', 'Sign up', 'Book now', 'Get offer', 'Download', 'Order now',
           'Acheter', 'En savoir plus', 'Installer', 'S’inscrire', "S'inscrire", 'Réserver', 'Télécharger', 'Commander'],
     partnership: ['Paid partnership', 'Partenariat rémunéré'],
+    follow: ['Follow', 'Follow Back', 'Suivre', 'Suivre en retour'],
     suggested: ['Suggested for you', 'Suggestions pour vous', 'Suggested posts', 'Publications suggérées', 'Suggested reels', 'Reels suggérés'],
     app: ['Open app', 'Use app', 'Use the app', 'Open Instagram', 'Get app', 'Get the app', 'Switch to the app',
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '17';
+  const SITE_VERSION = '18';
   const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -273,11 +274,11 @@
     for (const [tag, attrs] of parts) { const el = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); svg.append(el); }
     return svg;
   };
-  let bar = null, profileWanted = false;
+  let bar = null, profileWanted = 0; // when the Profile tab was tapped before the profile was known
   const goTab = (a) => {
     const href = a.getAttribute('href');
     // profile still unknown: open Home, whose bar has the profile link, and go on from there (syncTabs)
-    if (a.hasAttribute('data-focus-unknown')) { profileWanted = true; spaGo('/', barUp); return; }
+    if (a.hasAttribute('data-focus-unknown')) { profileWanted = performance.now(); spaGo('/', barUp); return; }
     const dest = href === '/explore/' && CFG.hideExplore ? '/explore/search/' : href;
     if (location.pathname !== dest) spaGo(dest, barUp);
   };
@@ -329,7 +330,8 @@
     hideSlots();
     const home = nativeTab('/');
     if (home && barUp()) learnBar(home);
-    if (profileWanted && store.profile && barUp()) { profileWanted = false; spaGo(store.profile, barUp); }
+    if (profileWanted && performance.now() - profileWanted > 5000) profileWanted = 0; // too late: the user has moved on
+    if (profileWanted && store.profile && barUp()) { profileWanted = 0; spaGo(store.profile, barUp); }
     const want = CFG.inboxTabBar && isInbox(location.pathname) && !barUp();
     if (want && !bar?.isConnected) document.body.append(bar = buildBar());
     if (!want && bar?.isConnected) { bar.remove(); for (const e of document.querySelectorAll('[data-focus-pad]')) e.removeAttribute('data-focus-pad'); }
@@ -367,6 +369,41 @@
       best = node;
     }
     return best;
+  };
+  // On the notifications page the accounts block sits at the end: a "Suggested for you" heading, a list of accounts
+  // with Follow buttons, a "See All" link to /explore/people/. What goes: the heading's own wrappers (ancestors holding
+  // nothing but its text, so activity rows can never be taken along), and the blocks holding Follow buttons or that
+  // link right after it (or after a close ancestor, if the heading is nested). The heading renders before its list,
+  // so this runs as a pass once Instagram has added to the page for a moment (at most 1 s after the first change).
+  const isFollowBlock = (n) => !!n.querySelector('a[href="/explore/people/"]')
+    || [...n.querySelectorAll('button, [role="button"]')].some((b) => WORDS.follow.includes(b.textContent.trim()));
+  const hideNotifSuggestions = (heading) => {
+    const text = heading.textContent.trim();
+    let head = heading;
+    while (head.parentElement && head.parentElement.textContent.trim() === text) head = head.parentElement;
+    let anchor = head; // the heading's wrapper, or up to 3 ancestors, whose next sibling is the account list
+    for (let i = 0; i < 3 && !(anchor.nextElementSibling && isFollowBlock(anchor.nextElementSibling)); i++) {
+      if (!anchor.parentElement || /^(MAIN|SECTION|BODY)$/.test(anchor.parentElement.tagName)) return;
+      anchor = anchor.parentElement;
+    }
+    if (!anchor.nextElementSibling || !isFollowBlock(anchor.nextElementSibling)) return; // not the block's heading
+    hide(head, 'suggested-heading');
+    for (let n = anchor.nextElementSibling; n && isFollowBlock(n); n = n.nextElementSibling) hide(n, 'suggested-accounts');
+  };
+  const onNotifs = () => CFG.hideSuggestedAccounts && location.pathname.startsWith('/notifications');
+  let notifTimer = null, notifFirst = 0;
+  const notifPass = () => {
+    const now = performance.now();
+    if (!notifTimer) notifFirst = now;
+    else if (now - notifFirst > 1000) return; // keeps mutating: let the pending pass run, don't push it back again
+    clearTimeout(notifTimer);
+    notifTimer = setTimeout(() => {
+      notifTimer = null;
+      if (!onNotifs()) return; // left the page meanwhile
+      for (const h of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+        if (WORDS.suggested.includes(h.textContent.trim()) && h.checkVisibility?.() !== false) hideNotifSuggestions(h);
+      }
+    }, 300);
   };
   const check = (el) => {
     if (el.childElementCount !== 0) return;
@@ -416,6 +453,7 @@
       if (videoChange) recheckLock();
     }
     if (tabsChanged || inboxPending()) syncTabs();
+    if (onNotifs()) notifPass();
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
   // every tap, logged when debugging (capture phase, so it is seen even if Instagram stops propagation)

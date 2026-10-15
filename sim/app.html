@@ -17,6 +17,9 @@
   #comments { height: 150px; overflow: auto; }
   [role="dialog"] { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 12px; border-top: 1px solid #ccc; }
   .hidden { display: none; }
+  /* a :hover reveal in CSS, like Instagram's stylesheets (the DM row's actions: opacity 0 -> 1 when the row is hovered) */
+  #cssactions { opacity: 0; }
+  :where(.rowmarker:hover *)#cssactions, .rowmarker:hover #cssactions { opacity: 1; }
 </style>
 </head>
 <body>
@@ -110,6 +113,10 @@
       for (let i = 0; i < 40; i++) msgs += `<div class="msg">message ${i}</div>`;
       msgs += `<div class="msg"><a data-spa id="reellink" href="/reel/ABC123/">Reel from Marie</a></div>`;
       msgs += `<div class="msg"><div role="button" id="reelcard">Reel from Paul (opens as an overlay)</div></div>`;
+      // a post shared in the thread: its message row reveals React / Reply / More on hover (measured on the phone)
+      msgs += `<div class="msg rowfirst" style="height:40px">message just before the shared post</div>`;
+      msgs += `<div role="group" id="sharedmsg" class="rowmarker" style="min-height:120px"><a data-spa id="sharedpost" href="/p/S1/" style="display:block;height:100px">post shared by Marie</a>
+        <div id="msgactions" style="visibility:hidden"><span>React</span> <span>Reply</span></div><div id="msgtext" style="height:40px">caption under the post</div><div id="cssactions">More</div></div>`;
       return `<main id="dm"><div style="height:40px">Marie</div><div id="dmlist">${msgs}</div></main>`;
     },
     reel(id) {
@@ -212,6 +219,16 @@
     render();
   };
 
+  // like React, hover handlers are delegated to the root container; a hover on a message row reveals its actions
+  // (iOS Safari then treats the tap as a hover and does not click: the post needs a second tap)
+  window.__hoverRevealed = false;
+  // React's enter/leave: an over event whose relatedTarget is React-managed is skipped, because the enter was already
+  // dispatched from that element's out event (out: from = target, to = relatedTarget). So the reveal comes from
+  // mouseout of the previously hovered element as well as from mouseover when coming from outside.
+  const reveal = (to) => { const g = to && to.closest && to.closest('#sharedmsg'); if (g) { window.__hoverRevealed = true; g.querySelector('#msgactions').style.visibility = 'visible'; } };
+  const rootEl = document.getElementById('root');
+  for (const t of ['mouseover', 'pointerover']) rootEl.addEventListener(t, (e) => { if (!(e.relatedTarget && rootEl.contains(e.relatedTarget))) reveal(e.target); });
+  for (const t of ['mouseout', 'pointerout']) rootEl.addEventListener(t, (e) => reveal(e.relatedTarget));
   // ignorePopstate=1 models a router that ignores script-made popstate events (only real Back/Forward)
   window.addEventListener('popstate', (e) => { if (localStorage.getItem('ignorePopstate') === '1' && !e.isTrusted) return; render(); });
   render();

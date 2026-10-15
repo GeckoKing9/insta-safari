@@ -279,6 +279,35 @@ async function main() {
       for (const id of ['shead', 'slist', 'sall']) if (await visible(page, '#' + id)) fail('S23', `${lang}/${layout}: suggested-accounts part #${id} visible`);
       await ctx.close();
     }
+    // S24 one tap opens a post shared in a DM: the hover events a finger's tap sends first never reach the page's
+    // hover handlers (revealing the message actions made Safari count the tap as a hover); a real mouse still hovers
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(500);
+      await page.evaluate(() => document.getElementById('sharedmsg').scrollIntoView({ block: 'center' }));
+      // the CSS half: Safari puts :hover on what a finger taps; Chromium's emulated tap does not, a mouse move does. On a
+      // phone (the emulation matches any-hover: none) no :hover rule may reveal anything
+      const row = await page.evaluate(() => { const r = document.getElementById('msgtext').getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; });
+      await page.mouse.move(row.x, row.y); await sleep(300);
+      const op = await page.evaluate(() => [document.getElementById('sharedmsg').matches(':hover'), getComputedStyle(document.getElementById('cssactions')).opacity]);
+      if (!op[0]) fail('S24', 'harness: the row did not get :hover from the mouse move');
+      else if (op[1] !== '0') fail('S24', `a CSS :hover rule revealed the message actions (opacity ${op[1]}): Safari takes such a tap as a hover`);
+      await page.mouse.move(5, 5); await sleep(1100); // leave the row; past the finger window before the taps below
+      await page.evaluate(() => { window.__hoverRevealed = false; document.getElementById('sharedmsg').scrollIntoView({ block: 'center' }); });
+      // a tap on something else first: the next tap's hover then arrives as that element's out event (React's enter)
+      await page.tap('.rowfirst'); await sleep(300);
+      await page.evaluate(() => { window.__hoverRevealed = false; });
+      await page.tap('#sharedpost'); await sleep(500);
+      if (await page.evaluate(() => window.__hoverRevealed)) fail('S24', "a finger's tap ran the page's hover handler (Safari swallows such a tap as a hover)");
+      // sanity only: Chromium never turns a tap into a hover-only tap, so this cannot fail for the bug itself
+      if (new URL(page.url()).pathname !== '/p/S1/') fail('S24', `the tap did not open the shared post, url=${page.url()}`);
+      await page.goBack(); await sleep(1500);
+      await page.evaluate(() => { window.__hoverRevealed = false; document.getElementById('sharedmsg').scrollIntoView({ block: 'center' }); });
+      const box = await page.evaluate(() => { const r = document.getElementById('sharedpost').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+      await page.mouse.move(box.x, box.y); await sleep(200);
+      if (!(await page.evaluate(() => window.__hoverRevealed))) fail('S24', 'a real mouse no longer hovers (iPad pointer)');
+      await ctx.close();
+    }
     // S22 a double tap never zooms the page: touch-action manipulation on the page and on links
     {
       const { ctx, page } = await newPage(browser);

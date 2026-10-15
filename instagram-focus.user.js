@@ -20,6 +20,7 @@
     followingFeed: false,       // open the Following feed instead of Home
     hideAppPrompts: true,       // "Open in app" banners, App Store links, Safari's Smart App Banner
     inboxTabBar: true,          // the four tabs stay at the bottom of the DM inbox (Instagram shows none there)
+    oneTap: true,               // a tap is never taken as a hover first (a post shared in a DM needed two taps)
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
@@ -33,7 +34,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '18';
+  const SITE_VERSION = '19';
   const DEBUG = false; // true = status strip at the bottom + event log in <html data-focus-log>, for bug hunting
 
   // Debug: a log of what the script sees and does, readable from a screenshot or from Web Inspector
@@ -89,6 +90,7 @@
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
     recheckLock();
     syncTabs();
+    unhoverSheets(); // a new page may have brought rules (cheap: unchanged sheets are skipped)
     log('route', p.slice(0, 30) + (firstLoad ? ' first' : ''));
   };
   let last = location.href;
@@ -429,6 +431,7 @@
   const pending = new Set();
   let flushTimer = null;
   const flush = () => { flushTimer = null; for (const n of pending) scan(n); pending.clear(); };
+  let sheetCount = 0;
   const onMutations = (muts) => {
     routeIfMoved();
     let tabsChanged = false;
@@ -454,13 +457,59 @@
     }
     if (tabsChanged || inboxPending()) syncTabs();
     if (onNotifs()) notifPass();
+    if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
+  // 6. One tap. A tap is first a hover for Safari: it sends hover events (pointerover, mouseover, mousemove) and puts
+  // :hover on what the finger touched. If that makes something appear, the tap counts as a hover and only the next
+  // tap clicks. Instagram's web app reveals desktop hover extras both ways (measured on the phone 2026-10-15: a DM
+  // message row shows React / Reply / More from a mouseover handler and from :hover rules, opacity 0 -> 1), so a post
+  // shared in a DM needed two taps. So: hover events from a finger never reach Instagram's handlers (registered first,
+  // on window, capture phase). That includes out/leave: React dispatches onMouseEnter from the PREVIOUS element's
+  // mouseout (its relatedTarget), and iOS keeps the last tapped element hovered, so every tap after the first would
+  // still reveal. Pen pointer events are treated as a finger; a real mouse (iPad pointer) still hovers. And on a device
+  // where nothing can hover, every :hover in Instagram's stylesheets is rewritten never to match: the page then
+  // behaves as if nothing were ever hovered, :not(:hover) and :has(:hover) included.
+  let unhoverSheets = () => {};
+  if (CFG.oneTap) {
+    let fingerAt = -Infinity;
+    for (const t of ['touchstart', 'touchend']) addEventListener(t, () => { fingerAt = performance.now(); }, { capture: true, passive: true });
+    addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') fingerAt = -Infinity; }, { capture: true, passive: true });
+    const fromFinger = (e) => (e.pointerType ? e.pointerType !== 'mouse' : performance.now() - fingerAt < 1000);
+    for (const t of ['pointerover', 'pointerenter', 'pointerout', 'pointerleave', 'mouseover', 'mouseenter', 'mouseout', 'mouseleave', 'mousemove']) {
+      addEventListener(t, (e) => { if (fromFinger(e)) e.stopImmediatePropagation(); }, true);
+    }
+    if (matchMedia('(any-hover: none)').matches) {
+      const seen = new WeakMap(); // sheet -> rule count when last rewritten (278 :hover rules among ~19k, ~20 ms once)
+      const LIVE_HOVER = /:hover(?!:not\(\*\))/g;
+      const unhover = (rules) => {
+        for (const r of rules) {
+          if (r.cssRules?.length) unhover(r.cssRules);
+          const sel = r.selectorText;
+          if (sel && LIVE_HOVER.test(sel)) { LIVE_HOVER.lastIndex = 0; r.selectorText = sel.replace(LIVE_HOVER, ':hover:not(*)'); }
+          LIVE_HOVER.lastIndex = 0;
+        }
+      };
+      unhoverSheets = () => {
+        for (const sh of document.styleSheets) {
+          try {
+            if (seen.get(sh) === sh.cssRules.length) continue; // unchanged since its last pass (rules added later are caught)
+            unhover(sh.cssRules); seen.set(sh, sh.cssRules.length);
+          } catch (err) {
+            if (err.name === 'SecurityError') seen.set(sh, -1); // another origin's, never readable: not retried
+            log('css', `stylesheet not rewritten: ${err.name}`); // InvalidAccessError = still loading, retried next time
+          }
+        }
+      };
+      addEventListener('load', (e) => { if (e.target instanceof HTMLLinkElement) unhoverSheets(); }, true); // a stylesheet arrived
+    }
+  }
+
   // every tap, logged when debugging (capture phase, so it is seen even if Instagram stops propagation)
   if (DEBUG) onRoot(() => document.addEventListener('click', (e) => log('click', describe(e.target)), true));
   onRoot(() => new MutationObserver(onMutations).observe(document.documentElement,
     { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['name'] }));
-  const initial = () => { scan(document.documentElement); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(); };
+  const initial = () => { scan(document.documentElement); unhoverSheets(); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initial); else initial();
   onRoot(() => route(true));
 })();

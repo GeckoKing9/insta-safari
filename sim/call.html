@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=2,shrink-to-fit=no">
 <title>Instagram Call (fixture)</title>
 <!-- like Instagram's call page: served with a nonce-only script policy (server.py); its first script reads the user agent -->
-<script nonce="t3st">window.__uaAtFirstScript = navigator.userAgent; window.__platformAtFirstScript = navigator.platform;</script>
+<script nonce="t3st">window.__uaAtFirstScript = navigator.userAgent; window.__platformAtFirstScript = navigator.platform;
+// a small module registry like Instagram's: its call gate computes its answers once, when its bundle arrives, from the
+// user agent it sees then; pre=1 = as if computed from the iPhone identity before the script could act (measured)
+(() => { const mods = {}, waiting = [];
+  const pre = new URLSearchParams(location.search).get('pre') === '1';
+  const define = () => { const ok = !pre && /Macintosh/.test(navigator.userAgent);
+    mods.RTWebIncomingRingConfiguration = { isSupportedClient() { return ok; }, isSupportedOutboundClient() { return ok; } }; };
+  window.require = (n) => mods[n];
+  window.requireLazy = (names, cb) => { if (names.every((n) => mods[n])) cb(...names.map((n) => mods[n])); else waiting.push([names, cb]); };
+  setTimeout(() => { define(); for (const [names, cb] of waiting.splice(0)) cb(...names.map((n) => mods[n])); }, 200);
+})();</script>
 </head>
 <body>
 <style>#controls { opacity: 0; } #stage:hover #controls { opacity: 1; }</style>

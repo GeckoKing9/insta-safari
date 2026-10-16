@@ -37,7 +37,8 @@
     follow: 'Follow', thisWeek: 'This week', seeAll: 'See All Suggestions',
   };
   window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
-  window.__opened = []; window.open = (u, t) => { window.__opened.push(`${u}|${t}`); return null; }; // records new-tab opens
+  // stubOpen=1: window.open only records what would open (S30); otherwise real tabs open (S32)
+  window.__opened = []; if (localStorage.getItem('stubOpen') === '1') window.open = (u, t) => { window.__opened.push(`${u}|${t}`); return null; };
   window.__doc = Math.random(); // survives in-page navigation, lost on a full reload
 
   // The bottom tab bar as Instagram builds it (measured on the phone 2026-10-15): a fixed 50 px bar holding a

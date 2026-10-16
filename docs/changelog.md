@@ -2,8 +2,9 @@
 
 ## v21 (2026-10-15, not yet released)
 - Calls (`calls`): Audio and Video call buttons in a DM conversation's header, opening Instagram's call page for that conversation in a new tab, like its desktop buttons. On the call page only, Instagram's code is told it runs in Mac Safari before any of its scripts (its gate allows desktop Safari 16+; iPhone Safari reads as Mobile Safari, so "Start call" could not reach anyone). The page's script policy is nonce-only, so the override borrows the nonce of Instagram's first script. Measured on the phone: no call buttons on mobile web, the gate closed in the call tab, the conversation id equal to the call's `ig_thread_id`.
+- Measured on the phone: Userscripts starts the script late on the call page, after Instagram has computed its call gate from the iPhone identity (`isSupportedOutboundClient` false: Start call could not reach anyone). Instagram looks its gate functions up on the module at each use, so the two closed ones are replaced once the module exists; on the phone the gate then reads open (outbound and client true).
 - Incoming calls still ring only in the app (that gate would need the whole site told it is a desktop, which brings back the desktop layout).
-- Harness S30 (buttons and the URL they open), S31 (the call page's first script sees Mac Safari under a nonce-only policy; other pages keep the real user agent).
+- Harness S30 (buttons and the URL they open), S31 (the call page's first script sees Mac Safari under a nonce-only policy; other pages keep the real user agent), S32 (the gate opens even when already computed from the iPhone identity).
 
 ## v20 = release v0.3 (2026-10-15)
 Checked on the phone: harness ALL PASS, DEVICE PASS, and in a real DM a text message shows React / More on a finger tap while a shared post shows nothing (opens on the first tap).

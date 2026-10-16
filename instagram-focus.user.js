@@ -53,20 +53,42 @@
   // allows only scripts that carry its nonce, so the override borrows the nonce of Instagram's first script tag and
   // runs before it: the parser runs pending microtasks (this observer) before it executes a script.
   const onCallPage = /^\/(call|groupcall)\//.test(location.pathname); // a full page of its own (a new tab), never reached in place
-  if (CFG.calls && onCallPage) {
+  const MAC = (() => { // what "Request Desktop Website" makes Safari say, with this Safari's own version
     const version = (navigator.userAgent.match(/Version\/([\d.]+)/) || [])[1] || '26.0';
-    const mac = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Safari/605.1.15`;
-    const code = `(() => { for (const [k, v] of ${JSON.stringify([['userAgent', mac], ['appVersion', mac.slice(8)], ['platform', 'MacIntel']])})
-      Object.defineProperty(Navigator.prototype, k, { get: () => v, configurable: true }); })();`;
+    const ua = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Safari/605.1.15`;
+    return [['userAgent', ua], ['appVersion', ua.slice(8)], ['platform', 'MacIntel']];
+  })();
+  // page-world code that gives the window `win` the Mac identity
+  const macPatch = (win) => `for (const [k, v] of ${JSON.stringify(MAC)}) Object.defineProperty(${win}.Navigator.prototype, k, { get: () => v, configurable: true });`;
+  // run code in the page itself (where Instagram's code lives); the page allows only scripts carrying its nonce
+  const runInPage = (code, nonce = document.querySelector('script[nonce]')?.nonce ?? '') => {
+    const tag = document.createElement('script');
+    tag.nonce = nonce; tag.textContent = code;
+    (document.head || document.documentElement).prepend(tag); tag.remove();
+  };
+  if (CFG.calls && onCallPage) {
+    // Instagram computes its call gate once, when its bundle arrives, from the identity it sees then. Started late
+    // (measured on the phone: Userscripts starts us after the parser there), it has already computed "not supported"
+    // from the iPhone identity: isSupportedOutboundClient false, so Start call could not reach anyone. Its gate
+    // functions are looked up on the module at each use, so the two closed ones are replaced once the module exists.
+    const code = `(() => { ${macPatch('window')}
+      const open = () => {
+        if (typeof window.requireLazy !== 'function') return false;
+        window.requireLazy(['RTWebIncomingRingConfiguration'], (gate) => {
+          let patched = false;
+          for (const k of ['isSupportedClient', 'isSupportedOutboundClient']) if (gate && typeof gate[k] === 'function' && !gate[k]()) { gate[k] = () => true; patched = true; }
+          document.documentElement.dataset.focusCallGate = patched ? 'patched' : 'native';
+        });
+        return true;
+      };
+      if (!open()) { const t = setInterval(() => { if (open()) clearInterval(t); }, 50); setTimeout(() => clearInterval(t), 15000); }
+    })();`;
     const inject = (nonce, when) => {
-      const tag = document.createElement('script');
-      tag.nonce = nonce; tag.textContent = code; // runs in the page, where Instagram's code reads navigator
-      (document.head || document.documentElement).prepend(tag); tag.remove();
+      runInPage(code, nonce);
       document.documentElement.dataset.focusCallUa = when; // "early" = before any of Instagram's scripts ran
     };
     const first = document.querySelector('script[nonce]');
-    // late: Userscripts started us after the parser had run a script; Instagram reads navigator when its call code
-    // first runs, from its bundles, so this usually still precedes it (the phone check reads the mark)
+    // late: Userscripts started us after the parser had run a script; the gate patch above still opens the call
     if (first) inject(first.nonce, 'late');
     else {
       const watch = new MutationObserver((muts) => {

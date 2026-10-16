@@ -16,3 +16,8 @@ Known limits (see the brief): English and French labels only; iPad, desktop and 
 controls (mute, camera, end) were hidden whenever the monitor sampled them, likely Instagram auto-hiding them until
 the screen is touched (the test call ended cleanly); the pre-v0.3 git history
 has a DM thread id and a few rule-breaking commits that would need a force-push to clean.
+
+<!-- session-end:auto -->
+**Last session (2026-10-16, coding):** Restored Instagram search tab, fixed tab bar and double taps, enabled mobile calls and video calls in Safari, and shipped v0.4.1 under the MIT license. The phone runs a byte-identical build.
+**Next:** none
+<!-- /session-end:auto -->

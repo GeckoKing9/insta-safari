@@ -427,6 +427,26 @@ async function main() {
       if (pre === '1' && g[2] !== 'patched') fail('S32', `pre=1: gate not marked patched (${g[2]})`);
       await ctx.close();
     }
+    // S33 the call screen fits the phone: Instagram lays it out as a 1024 px desktop row, so on a phone Start call sat
+    // off the right edge (measured: x 499-587 on a 430 px screen) and could not be tapped
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/call/?has_video=false&ig_thread_id=1'); await sleep(900);
+      // as it sits: no scrolling first (scrollIntoView would move an overflow:hidden box, which a finger cannot)
+      for (const sel of ['#startcall', '#mutebtn', '#speakerbtn', '#settingsbtn']) {
+        const where = await page.evaluate((s) => { const e = document.querySelector(s), r = e.getBoundingClientRect();
+          const inside = r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1;
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return inside && !!hit && (hit === e || e.contains(hit)) ? true : `x ${Math.round(r.left)}-${Math.round(r.right)} on a ${innerWidth} px screen`; }, sel);
+        if (where !== true) fail('S33', `${sel} cannot be tapped on the call page: ${where}`);
+      }
+      // the preview's own controls stay side by side (a row of small buttons is never stacked)
+      const tops = await page.evaluate(() => ['#mutebtn', '#speakerbtn', '#settingsbtn'].map((q) => Math.round(document.querySelector(q).getBoundingClientRect().top)));
+      if (new Set(tops).size !== 1) fail('S33', `the preview's buttons were stacked on top of each other (tops ${tops})`);
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+      if (wide > 1) fail('S33', `the call page is ${wide} px wider than the screen`);
+      await ctx.close();
+    }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
     {
       const { ctx, page } = await newPage(browser);

@@ -18,8 +18,17 @@
 })();</script>
 </head>
 <body>
-<style>#controls { opacity: 0; } #stage:hover #controls { opacity: 1; }</style>
-<div id="stage" style="height:300px"><div id="lobby">Ready to call? <div role="button" id="startcall">Start call</div></div>
-<div id="controls"><div role="button">Hang up</div></div></div>
+<style>body { margin: 0; } #controls { opacity: 0; } #stage:hover #controls { opacity: 1; }</style>
+<!-- the call lobby as Instagram lays it out (measured on the phone): a fixed 1024 px row, centred in a screen-wide box
+     that hides overflow: the camera preview (656 px) and the panel with "Ready to call? / Start call" (348 px) -->
+<div id="screen" style="position:absolute;left:0;top:0;width:100%;height:100vh;overflow:hidden;display:flex;justify-content:center;align-items:center">
+  <div id="wide" style="width:1024px;flex-shrink:0;display:flex;flex-direction:row">
+    <div id="stage" style="width:656px;height:300px;background:#222;color:#fff;display:flex;flex-direction:column;justify-content:space-between">Camera off
+      <div id="previewbtns" style="display:flex;flex-direction:row;width:100%;height:48px"><div role="button" id="mutebtn" style="width:40px;height:40px">Mic</div>
+        <div role="button" id="speakerbtn" style="width:40px;height:40px">Spk</div><div role="button" id="settingsbtn" style="width:40px;height:40px">Set</div></div>
+      <div id="controls"><div role="button">Hang up</div></div></div>
+    <div id="panel" style="width:348px;height:300px"><div id="lobby">F Ready to call? <div role="button" id="startcall" style="display:inline-block;width:88px;height:28px">Start call</div></div></div>
+  </div>
+</div>
 </body>
 </html>

@@ -254,6 +254,10 @@
     'html[data-focus-search] [data-focus-bar]{z-index:12!important}',
     'html[data-focus-search] body{padding-bottom:50px!important}'); // so the last result can scroll clear of the lifted bar
   css.push('*{touch-action:manipulation}'); // no double-tap zoom anywhere; Instagram's own touch-action rules still win
+  // the call page fitted to the phone (part 3 below marks the rows): wider than the screen -> a column that fits
+  if (CFG.calls && onCallPage) css.push('[data-focus-fit]{width:100%!important;max-width:100vw!important;min-width:0!important;flex-shrink:1!important}',
+    '[data-focus-fit][data-focus-stack]{flex-direction:column!important;align-items:stretch!important}',
+    '[data-focus-fit]>*{max-width:100%!important;min-width:0!important}');
   // Instagram's own app only (id389801252, also inside l.instagram.com shims): App Store links people send stay
   if (CFG.hideAppPrompts) css.push('a[href^="instagram://"],a[href*="389801252"]{display:none!important}');
   onRoot(() => {
@@ -437,6 +441,31 @@
     }
     slot.parentElement.insertBefore(callRow, slot);
   };
+  // 7. Calls, part 3: the call page is laid out for a desktop, a 1024 px row (camera preview + "Ready to call? / Start
+  // call") centred in a screen-wide box that hides overflow; on a phone Start call sat off the right edge (measured:
+  // x 499-587 on a 430 px screen) and could not be tapped. Every ancestor of a button that is wider than the screen is
+  // made to fit; a row of panels side by side (two or more children at least 150 px wide) is stacked into a column,
+  // while a row of small controls (mic, speaker, settings) stays a row. Checked again as the call screen changes.
+  let fitTimer = null;
+  const fitCallPage = () => {
+    fitTimer = null;
+    for (let pass = 0; pass < 3; pass++) { // a fitted row can reveal the next too-wide box inside it
+      let changed = false;
+      for (const b of document.querySelectorAll('button, [role="button"]')) {
+        for (let el = b.parentElement, i = 0; el && el !== document.body && i < 30; el = el.parentElement, i++) {
+          if (el.hasAttribute('data-focus-fit') || el.getBoundingClientRect().width <= innerWidth + 1) continue;
+          el.setAttribute('data-focus-fit', '');
+          const st = getComputedStyle(el);
+          const panels = [...el.children].filter((c) => c.getBoundingClientRect().width >= 150).length;
+          if (st.display.endsWith('flex') && st.flexDirection.startsWith('row') && panels >= 2) el.setAttribute('data-focus-stack', '');
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+  };
+  const scheduleFit = () => { if (CFG.calls && onCallPage && !fitTimer) fitTimer = setTimeout(fitCallPage, 100); };
+  addEventListener('resize', scheduleFit);
   const TAB_LINKS = 'a[href="/"], a[href="/reels/"], a[href="/explore/"], a[href="/direct/inbox/"]';
   const touchesTabs = (n) => n.nodeType === 1 && !n.closest?.('#focus-tabbar') && (n.matches(TAB_LINKS) || !!n.querySelector(TAB_LINKS) || !!n.closest?.(TAB_LINKS));
 
@@ -559,6 +588,7 @@
     if (tabsChanged || inboxPending()) syncTabs();
     if (CFG.calls && !callRow?.isConnected && performance.now() < callsUntil) syncCalls();
     if (onNotifs()) notifPass();
+    scheduleFit();
     if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };

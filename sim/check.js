@@ -453,6 +453,33 @@ async function main() {
       if (wide > 1) fail('S33', `the call page is ${wide} px wider than the screen`);
       await ctx.close();
     }
+    // S34 the call page holds up: a panel that mounts late still gets stacked; a page enforcing Trusted Types does not
+    // stop the rest of the script (the fit); a gate that cannot be replaced is reported as failed, not patched
+    {
+      const where = async (page, sel) => page.evaluate((s) => { const e = document.querySelector(s), r = e.getBoundingClientRect(), h = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return r.left >= 0 && r.right <= innerWidth + 1 && !!h && (h === e || e.contains(h)) ? true : `x ${Math.round(r.left)}-${Math.round(r.right)}`; }, sel);
+      for (const [q, what] of [['latepanel=1', 'late panel'], ['tt=1', 'Trusted Types page']]) {
+        const { ctx, page } = await newPage(browser);
+        await page.goto(BASE + `/call/?has_video=false&ig_thread_id=1&${q}`); await sleep(1300);
+        const w = await where(page, '#startcall');
+        if (w !== true) fail('S34', `${what}: Start call cannot be tapped (${w})`);
+        if (q === 'latepanel=1' && !(await page.evaluate(() => document.getElementById('wide').hasAttribute('data-focus-stack')))) fail('S34', 'late panel: the row was fitted but never stacked');
+        await ctx.close();
+      }
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/call/?has_video=false&ig_thread_id=1&pre=1&frozen=1'); await sleep(900);
+      const g = await page.evaluate(() => document.documentElement.dataset.focusCallGate);
+      if (g !== 'failed') fail('S34', `a gate module that cannot be patched is marked "${g}", expected "failed"`);
+      await ctx.close();
+    }
+    // S35 the call buttons come back when the conversation header re-renders long after the page changed
+    {
+      const { ctx, page } = await newPage(browser, { storage: { remount: '1', stubOpen: '1' } });
+      await page.goto(BASE + '/direct/t/1/'); await sleep(12500);
+      const n = await page.evaluate(() => document.querySelectorAll('#threadhead [role="button"][aria-label="Video call"]').length);
+      if (n !== 1) fail('S35', `after the header re-rendered at 11 s, ${n} Video call buttons`);
+      await ctx.close();
+    }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
     {
       const { ctx, page } = await newPage(browser);

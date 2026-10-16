@@ -10,8 +10,10 @@
 // user agent it sees then; pre=1 = as if computed from the iPhone identity before the script could act (measured)
 (() => { const mods = {}, waiting = [];
   const pre = new URLSearchParams(location.search).get('pre') === '1';
+  const frozen = new URLSearchParams(location.search).get('frozen') === '1'; // a module whose exports cannot be replaced
   const define = () => { const ok = !pre && /Macintosh/.test(navigator.userAgent);
-    mods.RTWebIncomingRingConfiguration = { isSupportedClient() { return ok; }, isSupportedOutboundClient() { return ok; } }; };
+    mods.RTWebIncomingRingConfiguration = { isSupportedClient() { return ok; }, isSupportedOutboundClient() { return ok; } };
+    if (frozen) Object.freeze(mods.RTWebIncomingRingConfiguration); };
   window.require = (n) => mods[n];
   window.requireLazy = (names, cb) => { if (names.every((n) => mods[n])) cb(...names.map((n) => mods[n])); else waiting.push([names, cb]); };
   setTimeout(() => { define(); for (const [names, cb] of waiting.splice(0)) cb(...names.map((n) => mods[n])); }, 200);
@@ -30,5 +32,9 @@
     <div id="panel" style="width:348px;height:300px"><div id="lobby">F Ready to call? <div role="button" id="startcall" style="display:inline-block;width:88px;height:28px">Start call</div></div></div>
   </div>
 </div>
+<script nonce="t3st">
+// latepanel=1: the panel mounts 400 ms after the row was first laid out (as React may do)
+if (new URLSearchParams(location.search).get('latepanel') === '1') { const p = document.getElementById('panel'); p.remove(); setTimeout(() => document.getElementById('wide').append(p), 400); }
+</script>
 </body>
 </html>

@@ -37,7 +37,7 @@
     follow: 'Follow', thisWeek: 'This week', seeAll: 'See All Suggestions',
   };
   window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
-  // stubOpen=1: window.open only records what would open (S30); otherwise real tabs open (S32)
+  // stubOpen=1: window.open only records what would open (S30); otherwise the real window.open runs
   window.__opened = []; if (localStorage.getItem('stubOpen') === '1') window.open = (u, t) => { window.__opened.push(`${u}|${t}`); return null; };
   window.__doc = Math.random(); // survives in-page navigation, lost on a full reload
 
@@ -138,6 +138,11 @@
         <svg aria-label="Conversation information" width="24" height="24" viewBox="0 0 24 24"><title>Conversation information</title><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"/></svg></div></div></div>
         <div id="dmlist">${msgs}</div></main>`;
     },
+    // remount=1: 11 s after load the thread header is replaced by a fresh copy (a re-render, no URL change)
+    remountHeader() {
+      if (localStorage.getItem('remount') !== '1') return;
+      setTimeout(() => { const h = document.getElementById('threadhead'); if (h) h.replaceWith(document.createRange().createContextualFragment(h.outerHTML.replace(/<div role="button" aria-label="(Audio|Video) call"[\s\S]*?<\/div>\s*/g, ''))); }, 11000);
+    },
     reel(id) {
       // native vertical scroller holding the current reel and the next one, like Instagram's reel feed
       return `<main id="reel"><div id="viewer"><div class="slide"><video id="v" muted playsinline></video><div>reel ${id}</div>
@@ -178,7 +183,7 @@
     else if (/^\/reels\/?$/.test(p)) html = views.reelsfeed();
     else if (/^\/(?:[^/]+\/)?reels?\/([^/]+)/.test(p)) html = views.reel(RegExp.$1);
     else if (p === '/direct/inbox/') html = views.inbox();
-    else if (p.startsWith('/direct/t/')) html = views.dm();
+    else if (p.startsWith('/direct/t/')) { html = views.dm(); views.remountHeader(); }
     else if (p.startsWith('/notifications')) { html = views.notifications(); setTimeout(views.notificationsLate, 400); }
     else html = views.other();
     document.getElementById('root').innerHTML = html;

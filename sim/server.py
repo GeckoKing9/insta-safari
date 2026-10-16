@@ -7,11 +7,12 @@ CALL = open(os.path.join(HERE, "call.html"), "rb").read()  # the call page, unde
 
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        call = self.path.startswith("/call/")
+        call = self.path.startswith(("/call/", "/groupcall/"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
-        if call: self.send_header("Content-Security-Policy", "script-src 'nonce-t3st' 'self'")
+        # tt=1: the page also enforces Trusted Types (assigning script text throws without a policy)
+        if call: self.send_header("Content-Security-Policy", "script-src 'nonce-t3st' 'self'" + ("; require-trusted-types-for 'script'" if "tt=1" in self.path else ""))
         self.end_headers()
         self.wfile.write(CALL if call else PAGE)
     def log_message(self, *a): pass

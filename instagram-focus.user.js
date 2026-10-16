@@ -52,7 +52,8 @@
   // rest of Instagram awkward). So on the call page only, Instagram's code is told it runs in Mac Safari. The page
   // allows only scripts that carry its nonce, so the override borrows the nonce of Instagram's first script tag and
   // runs before it: the parser runs pending microtasks (this observer) before it executes a script.
-  const onCallPage = /^\/(call|groupcall)\//.test(location.pathname); // a full page of its own (a new tab), never reached in place
+  const callPath = () => /^\/(call|groupcall)\//.test(location.pathname); // checked at run time: the tab may move on after the call
+  const onCallPage = callPath(); // at document start, for the override, which only matters for this document
   const MAC = (() => { // what "Request Desktop Website" makes Safari say, with this Safari's own version
     const version = (navigator.userAgent.match(/Version\/([\d.]+)/) || [])[1] || '26.0';
     const ua = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Safari/605.1.15`;
@@ -60,11 +61,14 @@
   })();
   // page-world code that gives the window `win` the Mac identity
   const macPatch = (win) => `for (const [k, v] of ${JSON.stringify(MAC)}) Object.defineProperty(${win}.Navigator.prototype, k, { get: () => v, configurable: true });`;
-  // run code in the page itself (where Instagram's code lives); the page allows only scripts carrying its nonce
-  const runInPage = (code, nonce = document.querySelector('script[nonce]')?.nonce ?? '') => {
+  // run code in the page itself (where Instagram's code lives); the page allows only scripts carrying its nonce.
+  // Returns false when the page refuses script text (Trusted Types), so the rest of the script still runs.
+  const runInPage = (code, nonce) => {
     const tag = document.createElement('script');
-    tag.nonce = nonce; tag.textContent = code;
+    tag.nonce = nonce;
+    try { tag.textContent = code; } catch { return false; }
     (document.head || document.documentElement).prepend(tag); tag.remove();
+    return true;
   };
   if (CFG.calls && onCallPage) {
     // Instagram computes its call gate once, when its bundle arrives, from the identity it sees then. Started late
@@ -75,17 +79,21 @@
       const open = () => {
         if (typeof window.requireLazy !== 'function') return false;
         window.requireLazy(['RTWebIncomingRingConfiguration'], (gate) => {
-          let patched = false;
-          for (const k of ['isSupportedClient', 'isSupportedOutboundClient']) if (gate && typeof gate[k] === 'function' && !gate[k]()) { gate[k] = () => true; patched = true; }
-          document.documentElement.dataset.focusCallGate = patched ? 'patched' : 'native';
+          let patched = false, failed = false;
+          for (const k of ['isSupportedClient', 'isSupportedOutboundClient']) {
+            if (!gate || typeof gate[k] !== 'function' || gate[k]()) continue;
+            try { gate[k] = () => true; } catch (e) { /* a frozen module in strict code */ }
+            if (gate[k]()) patched = true; else failed = true; // a frozen module ignores the assignment
+          }
+          document.documentElement.dataset.focusCallGate = failed ? 'failed' : patched ? 'patched' : 'native';
         });
         return true;
       };
       if (!open()) { const t = setInterval(() => { if (open()) clearInterval(t); }, 50); setTimeout(() => clearInterval(t), 15000); }
+      setTimeout(() => { document.documentElement.dataset.focusCallGate ||= 'missing'; }, 15000); // the module never came
     })();`;
-    const inject = (nonce, when) => {
-      runInPage(code, nonce);
-      document.documentElement.dataset.focusCallUa = when; // "early" = before any of Instagram's scripts ran
+    const inject = (nonce, when) => { // "early" = before any of Instagram's scripts ran; "blocked" = the page refused
+      document.documentElement.dataset.focusCallUa = runInPage(code, nonce) ? when : 'blocked';
     };
     const first = document.querySelector('script[nonce]');
     // late: Userscripts started us after the parser had run a script; the gate patch above still opens the call
@@ -166,7 +174,7 @@
     clearTimeout(recheckTimer);
     const apply = () => {
       // never on the call page: a video call's big video in its scrolling box is not a reel (it would block the call's drags)
-      lockSwipe(CFG.singleReelOnly && !onCallPage && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+      lockSwipe(CFG.singleReelOnly && !callPath() && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
       if (locked) pin(); // a box that appeared while already locked is pinned now, not at the next tick
     };
     apply(); // and again after the overlay has laid out, and once more for a slow opening animation
@@ -178,7 +186,7 @@
   // starting those too makes them audible once the sound is turned on.
   const onScreen = (v) => { const r = v.getBoundingClientRect(); return r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
   const nudgePlay = (v) => {
-    if (!CFG.autoPlayReels || onCallPage) return; // the call page plays its own videos
+    if (!CFG.autoPlayReels || callPath()) return; // the call page plays its own videos
     const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v) && onScreen(v)) { v.play().catch(() => { /* refused (Low Power Mode, or not ready): Instagram's own play button still works */ }); } };
     v.addEventListener('loadeddata', tryPlay, { once: true });
     setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);
@@ -430,7 +438,8 @@
     if (!slot?.parentElement) return;
     callRow = document.createElement('div');
     callRow.style.cssText = 'display:flex;align-items:center';
-    for (const [label, video] of [['Audio call', false], ['Video call', true]]) {
+    const fr = document.documentElement.lang?.startsWith('fr');
+    for (const [label, video] of [[fr ? 'Appel audio' : 'Audio call', false], [fr ? 'Appel vidéo' : 'Video call', true]]) {
       const b = document.createElement('div');
       b.setAttribute('role', 'button'); b.setAttribute('aria-label', label); b.tabIndex = 0;
       b.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;cursor:pointer;color:inherit;-webkit-tap-highlight-color:transparent';
@@ -454,18 +463,22 @@
       let changed = false;
       for (const b of document.querySelectorAll('button, [role="button"]')) {
         for (let el = b.parentElement, i = 0; el && el !== document.body && i < 30; el = el.parentElement, i++) {
-          if (el.hasAttribute('data-focus-fit') || el.getBoundingClientRect().width <= innerWidth + 1) continue;
-          el.setAttribute('data-focus-fit', '');
+          const fitted = el.hasAttribute('data-focus-fit');
+          if (fitted && el.hasAttribute('data-focus-stack')) continue;
+          if (!fitted) {
+            if (el.getBoundingClientRect().width <= innerWidth + 1) continue;
+            el.setAttribute('data-focus-fit', ''); changed = true;
+          }
+          // a fitted row is checked again: its second panel may mount later
           const st = getComputedStyle(el);
           const panels = [...el.children].filter((c) => c.getBoundingClientRect().width >= 150).length;
-          if (st.display.endsWith('flex') && st.flexDirection.startsWith('row') && panels >= 2) el.setAttribute('data-focus-stack', '');
-          changed = true;
+          if (st.display.endsWith('flex') && st.flexDirection.startsWith('row') && panels >= 2) { el.setAttribute('data-focus-stack', ''); changed = true; }
         }
       }
       if (!changed) break;
     }
   };
-  const scheduleFit = () => { if (CFG.calls && onCallPage && !fitTimer) fitTimer = setTimeout(fitCallPage, 100); };
+  const scheduleFit = () => { if (CFG.calls && callPath() && !fitTimer) fitTimer = setTimeout(fitCallPage, 300); };
   addEventListener('resize', scheduleFit);
   const TAB_LINKS = 'a[href="/"], a[href="/reels/"], a[href="/explore/"], a[href="/direct/inbox/"]';
   const touchesTabs = (n) => n.nodeType === 1 && !n.closest?.('#focus-tabbar') && (n.matches(TAB_LINKS) || !!n.querySelector(TAB_LINKS) || !!n.closest?.(TAB_LINKS));
@@ -565,13 +578,16 @@
   let sheetCount = 0;
   const onMutations = (muts) => {
     routeIfMoved();
-    let tabsChanged = false, videoChange = false;
+    const inThread = CFG.calls && location.pathname.startsWith('/direct/t/');
+    let tabsChanged = false, videoChange = false, structural = false, headerAdded = false;
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }
       for (const n of m.addedNodes) {
         if (n.nodeType === 3) { if (n.parentElement) pending.add(n.parentElement); continue; } // a label's text arriving late
         if (n.nodeType !== 1) continue;
+        structural = true;
+        if (!headerAdded && inThread && (n.matches(INFO) || n.querySelector(INFO))) headerAdded = true; // a (re-)rendered conversation header
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
         scan(n); // right away: a post hidden before the feed measures it never makes the feed jump
@@ -587,9 +603,9 @@
     }
     if (videoChange) recheckLock();
     if (tabsChanged || inboxPending()) syncTabs();
-    if (CFG.calls && !callRow?.isConnected && performance.now() < callsUntil) syncCalls();
+    if (CFG.calls && !callRow?.isConnected && (headerAdded || performance.now() < callsUntil)) syncCalls();
     if (onNotifs()) notifPass();
-    scheduleFit();
+    if (structural) scheduleFit(); // not for a running call timer's text changes
     if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
@@ -606,7 +622,7 @@
   // :hover in Instagram's stylesheets is rewritten never to match: the page behaves as if nothing were ever hovered,
   // :not(:hover) and :has(:hover) included.
   let unhoverSheets = () => {};
-  if (CFG.oneTap && !onCallPage) { // the call page's desktop controls appear on hover: left as Instagram made them
+  if (CFG.oneTap) { // off on the call page (checked at each event): its desktop controls appear on hover
     let fingerAt = -Infinity;
     for (const t of ['touchstart', 'touchend']) addEventListener(t, () => { fingerAt = performance.now(); unhoverSheets(); }, { capture: true, passive: true });
     addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') fingerAt = -Infinity; }, { capture: true, passive: true });
@@ -615,7 +631,7 @@
     const opens = (el) => el instanceof Element && (!!el.closest(OPENS) || getComputedStyle(el).cursor === 'pointer');
     const onto = (e) => (/out|leave/.test(e.type) ? e.relatedTarget : e.target); // where the hover is moving to
     for (const t of ['pointerover', 'pointerenter', 'pointerout', 'pointerleave', 'mouseover', 'mouseenter', 'mouseout', 'mouseleave', 'mousemove']) {
-      addEventListener(t, (e) => { if (fromFinger(e) && opens(onto(e))) e.stopImmediatePropagation(); }, true);
+      addEventListener(t, (e) => { if (fromFinger(e) && !callPath() && opens(onto(e))) e.stopImmediatePropagation(); }, true);
     }
     if (matchMedia('(any-hover: none)').matches) {
       const seen = new WeakMap(); // sheet -> rule count when last rewritten (278 :hover rules among ~19k, ~20 ms once)
@@ -627,6 +643,7 @@
         }
       };
       unhoverSheets = () => {
+        if (callPath()) return; // the call page keeps its :hover
         for (const sh of document.styleSheets) {
           if (seen.get(sh) === -1) continue; // another origin's, never readable
           try {

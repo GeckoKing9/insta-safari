@@ -74,3 +74,7 @@ Rollback: `git checkout v0.2 -- instagram-focus.user.js`, then step 3.
 - Never start `usbmuxd` by hand: Ubuntu's socket-activated one grabs the phone by itself, and two daemons fighting over the interface (`LIBUSB_ERROR_BUSY`) kill the USB link.
 - Web Inspector probes stall while the phone is locked; file transfers still work. A probe that hangs the page can drop the USB link; re-attach after any timeout.
 - No ad has shown up in the Following feed during any probe, so the ad label text is matched from what Instagram is known to use (Sponsored, Sponsorisé, Commandité, Publicité) plus ad links that leave Instagram.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Not affiliated with Instagram or Meta.

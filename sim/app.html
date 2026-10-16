@@ -231,7 +231,7 @@
       const ov = document.createElement('div');
       ov.setAttribute('role', 'dialog'); ov.id = 'overlay';
       ov.style.cssText = 'position:fixed;inset:0;background:#000;color:#fff;z-index:10';
-      ov.innerHTML = `<div id="oviewer" style="height:100%;overflow:auto"><div class="oslide" style="height:100%"><video muted playsinline style="display:block;width:100%;height:95%"></video><button id="olike">Like</button></div><div class="oslide" style="height:100%">next reel</div></div><button id="oclose" style="position:absolute;top:8px;right:8px">Close</button>`;
+      ov.innerHTML = `<div id="oviewer" style="height:100%;overflow:auto"><div class="oslide" style="height:100%"><video muted playsinline style="display:block;width:100%;height:95%"></video><button id="olike">Like</button></div><div class="oslide" style="height:100%"><video muted playsinline style="display:block;width:100%;height:95%"></video>next reel</div></div><button id="oclose" style="position:absolute;top:8px;right:8px">Close</button>`;
       document.body.appendChild(ov);
       const ovw = document.getElementById('oviewer');
       let y0 = null;
@@ -250,7 +250,6 @@
   // like React, hover handlers are delegated to the root container; a hover on a message row reveals its actions
   // (iOS Safari then treats the tap as a hover and does not click: the post needs a second tap)
   window.__hoverRevealed = false;
-  let rootEl0;
   // React's enter/leave: an over event whose relatedTarget is React-managed is skipped, because the enter was already
   // dispatched from that element's out event (out: from = target, to = relatedTarget). So the reveal comes from
   // mouseout of the previously hovered element as well as from mouseover when coming from outside.
@@ -259,9 +258,8 @@
     const g = to && to.closest && to.closest('#sharedmsg'); if (g) { window.__hoverRevealed = true; g.querySelector('#msgactions').style.visibility = 'visible'; }
     const t = to && to.closest && to.closest('#textmsg'); if (t) { window.__textRevealed = true; t.querySelector('[data-actions]').style.visibility = 'visible'; }
   };
-  rootEl0 = document.getElementById('root');
-  rootEl0.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#sharedcaption')) { history.pushState(null, '', '/p/S1/'); render(); } });
   const rootEl = document.getElementById('root');
+  rootEl.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#sharedcaption')) { history.pushState(null, '', '/p/S1/'); render(); } });
   for (const t of ['mouseover', 'pointerover']) rootEl.addEventListener(t, (e) => { if (!(e.relatedTarget && rootEl.contains(e.relatedTarget))) reveal(e.target); });
   for (const t of ['mouseout', 'pointerout']) rootEl.addEventListener(t, (e) => reveal(e.relatedTarget));
   // ignorePopstate=1 models a router that ignores script-made popstate events (only real Back/Forward)

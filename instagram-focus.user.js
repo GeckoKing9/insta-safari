@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Focus
 // @namespace    https://github.com/GeckoKing9/insta-safari
-// @version      21
+// @version      22
 // @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested accounts or "open the app" prompts; four even tabs, one tap per action. Toggles below.
 // @homepageURL  https://github.com/GeckoKing9/insta-safari
 // @updateURL    https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js
@@ -43,7 +43,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '21'; // keep equal to @version above: Userscripts offers an update only when @version grows
+  const SITE_VERSION = '22'; // keep equal to @version above: Userscripts offers an update only when @version grows
 
   // 7. Calls, part 1 (first, before the page parses any script). Instagram's web calls (its /call/ page, opened in a
   // new tab) start only when its code believes the browser is a desktop one on its list, which includes Safari 16+.
@@ -125,7 +125,7 @@
     if (CFG.hideReelsFeed && isReelsFeed(p)) { location.replace('/'); return; }
     if (CFG.hideSearch && (p === '/explore' || p.startsWith('/explore/'))) { location.replace('/'); return; } // not /explorecanada/
     // the full "Suggested for you" accounts page (its entry points are hidden; a typed URL or history still gets there)
-    if (CFG.hideSuggestedAccounts && /^\/explore\/people(\/|$)/.test(p)) { spaGo('/', () => true, true); return; }
+    if (CFG.hideSuggestedAccounts && /^\/explore\/people(\/|$)/.test(p)) { location.replace('/'); return; }
     // The search tab (/explore/) is a search box over the recommended grid. With the grid hidden it is a blank
     // page whose box only opens the real search page, so the tab goes straight there: one tap to the keyboard.
     // The CSS keeps tiles hidden on both paths, for the moment before the search page replaces Explore.
@@ -142,11 +142,13 @@
     syncTabs();
     callsUntil = performance.now() + 10000; // the conversation header renders late: look for it on changes for 10 s
     syncCalls();
+    scheduleFit(); // a call page already drawn when the script starts late is fitted now, not at its next change
     unhoverSheets(); // a new page may have brought rules (cheap: unchanged sheets are skipped)
   };
-  let last = location.href;
-  const routeIfMoved = () => { if (location.href !== last) { last = location.href; route(); } };
-  setInterval(routeIfMoved, 300); // also run from the mutation observer, so a new page is routed before it paints
+  // the path only: a query change (a carousel's ?img_index) is not a new page
+  let last = location.pathname;
+  const routeIfMoved = () => { if (location.pathname !== last) { last = location.pathname; route(); } };
+  setInterval(routeIfMoved, 1000); // a fallback: the mutation observer runs it first, so a new page is routed before it paints
 
   // 2. Swipe lock, engaged by URL (/reel/ID and /reels/ID) or by content: a reel opened from a DM is an
   // overlay on top of the DM page, the URL does not change, so a near-fullscreen video sitting in a
@@ -174,7 +176,7 @@
     clearTimeout(recheckTimer);
     const apply = () => {
       // never on the call page: a video call's big video in its scrolling box is not a reel (it would block the call's drags)
-      lockSwipe(CFG.singleReelOnly && !callPath() && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+      lockSwipe(CFG.singleReelOnly && !callPath() && (isReelPage(location.pathname) || overlayReel()));
       if (locked) pin(); // a box that appeared while already locked is pinned now, not at the next tick
     };
     apply(); // and again after the overlay has laid out, and once more for a slow opening animation
@@ -456,12 +458,13 @@
   // x 499-587 on a 430 px screen) and could not be tapped. Every ancestor of a button that is wider than the screen is
   // made to fit; a row of panels side by side (two or more children at least 150 px wide) is stacked into a column,
   // while a row of small controls (mic, speaker, settings) stays a row. Checked again as the call screen changes.
+  const BUTTONS = 'button, [role="button"]';
   let fitTimer = null;
   const fitCallPage = () => {
     fitTimer = null;
     for (let pass = 0; pass < 3; pass++) { // a fitted row can reveal the next too-wide box inside it
       let changed = false;
-      for (const b of document.querySelectorAll('button, [role="button"]')) {
+      for (const b of document.querySelectorAll(BUTTONS)) {
         for (let el = b.parentElement, i = 0; el && el !== document.body && i < 30; el = el.parentElement, i++) {
           const fitted = el.hasAttribute('data-focus-fit');
           if (fitted && el.hasAttribute('data-focus-stack')) continue;
@@ -563,7 +566,7 @@
       else if (CFG.hideSuggestedAccounts) { const unit = carouselOf(el); if (unit === LATER) pending.add(el); else hide(unit); }
     }
     // a dialog whose button says "Use the app" is the app prompt itself; in the header only the button goes
-    else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el, 'app-prompt');
+    else if (CFG.hideAppPrompts && WORDS.app.includes(t)) hide(el.closest('[role="dialog"]') || el.closest('button, a, [role="button"]') || el);
   };
   const scan = (root) => {
     if (root.nodeType !== 1) return;
@@ -578,15 +581,15 @@
   let sheetCount = 0;
   const onMutations = (muts) => {
     routeIfMoved();
-    const inThread = CFG.calls && location.pathname.startsWith('/direct/t/');
-    let tabsChanged = false, videoChange = false, structural = false, headerAdded = false;
+    const inThread = CFG.calls && location.pathname.startsWith('/direct/t/'), onCall = CFG.calls && callPath();
+    let tabsChanged = false, videoChange = false, buttonAdded = false, headerAdded = false;
     for (const m of muts) {
       if (m.type === 'characterData') { const p = m.target.parentElement; if (p) pending.add(p); continue; }
       if (m.type === 'attributes') { if (CFG.hideAppPrompts && isBannerMeta(m.target)) m.target.remove(); continue; }
       for (const n of m.addedNodes) {
         if (n.nodeType === 3) { if (n.parentElement) pending.add(n.parentElement); continue; } // a label's text arriving late
         if (n.nodeType !== 1) continue;
-        structural = true;
+        if (onCall && !buttonAdded && (n.matches(BUTTONS) || n.querySelector(BUTTONS))) buttonAdded = true; // the fit hangs on buttons
         if (!headerAdded && inThread && (n.matches(INFO) || n.querySelector(INFO))) headerAdded = true; // a (re-)rendered conversation header
         // Safari reads the Smart App Banner tag the moment Instagram re-inserts it, so remove it right here
         if (CFG.hideAppPrompts && isBannerMeta(n)) { n.remove(); continue; }
@@ -605,7 +608,7 @@
     if (tabsChanged || inboxPending()) syncTabs();
     if (CFG.calls && !callRow?.isConnected && (headerAdded || performance.now() < callsUntil)) syncCalls();
     if (onNotifs()) notifPass();
-    if (structural) scheduleFit(); // not for a running call timer's text changes
+    if (buttonAdded || (onCall && videoChange)) scheduleFit(); // a new control or video tile; not the icons and timers a call keeps swapping
     if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
   };
@@ -662,7 +665,8 @@
 
   onRoot(() => new MutationObserver(onMutations).observe(document.documentElement,
     { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['name'] }));
-  const initial = () => { scan(document.documentElement); unhoverSheets(); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(); };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initial); else initial();
-  onRoot(() => route(true));
+  const initial = (firstLoad) => { scan(document.documentElement); unhoverSheets(); if (CFG.hideAppPrompts) document.querySelector('meta[name="apple-itunes-app"]')?.remove(); route(firstLoad); };
+  // at document start, route at once (a redirect before anything paints) and again once the page exists; started
+  // late (as Userscripts often does on the phone), once
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => initial(false)); onRoot(() => route(true)); } else initial(true);
 })();

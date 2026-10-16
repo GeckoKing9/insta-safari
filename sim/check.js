@@ -14,11 +14,13 @@ const fail = (id, why) => fails.push(`FAIL ${id}: ${why}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // cfg: CFG lines to flip, e.g. { 'hideSearch: false,': 'hideSearch: true,' }; a line that is not in the script fails loudly
-async function newPage(browser, { script = true, storage = {}, cfg = {}, device = 'iPhone 15 Pro Max', copies = 1 } = {}) {
+// late: start the script that many ms after the page's load event (Userscripts on the phone often starts it after the parser)
+async function newPage(browser, { script = true, storage = {}, cfg = {}, device = 'iPhone 15 Pro Max', copies = 1, late = 0 } = {}) {
   const ctx = await browser.newContext({ ...devices[device], locale: 'en-CA' });
   await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
   let src = SCRIPT;
   for (const [from, to] of Object.entries(cfg)) { if (!src.includes(from)) throw new Error(`CFG line not found: ${from}`); src = src.replace(from, to); }
+  if (late) src = `addEventListener('load', () => setTimeout(() => {\n${src}\n}, ${late}));`;
   if (script) for (let i = 0; i < copies; i++) await ctx.addInitScript(src);
   const page = await ctx.newPage();
   page.setDefaultTimeout(8000); // a missing target fails its scenario fast instead of stalling 30 s
@@ -280,6 +282,16 @@ async function main() {
       if (bg !== 'rgb(255, 255, 255)') fail('S21c', `light-mode inbox bar background is ${bg}, expected the light default`);
       await ctx.close();
     }
+    // S21d switching light/dark with the inbox open keeps the signed-in account on the Profile tab, not the remembered one
+    {
+      const { ctx, page } = await newPage(browser, { storage: { focusTabs: JSON.stringify({ profile: '/other/' }) } });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.goto(BASE + '/direct/inbox/'); await sleep(900);
+      await page.emulateMedia({ colorScheme: 'light' }); await sleep(400);
+      const href = await page.evaluate(() => document.querySelector('#focus-tabbar [aria-label="Profile"]')?.getAttribute('href'));
+      if (href !== '/me/') fail('S21d', `after a colour scheme switch the Profile tab opens ${href}, expected the signed-in /me/`);
+      await ctx.close();
+    }
     // S23 notifications: the suggested-accounts block at the end (heading, accounts, "See All") is hidden like the
     // home carousel; activity rows stay, including one with its own Follow button
     for (const [lang, layout] of [['en', 'flat'], ['fr', 'flat'], ['en', 'nested']]) {
@@ -345,6 +357,13 @@ async function main() {
       if (!(await page.evaluate(() => getComputedStyle(document.getElementById('appstorelink')).display !== 'none'))) fail('S25', 'an App Store link sent in a DM was hidden');
       await page.goto(BASE + '/explore/people/'); await sleep(900);
       if (new URL(page.url()).pathname !== '/') fail('S25', `the suggested-accounts page /explore/people/ stayed open, url=${page.url()}`);
+      await ctx.close();
+    }
+    // S25b the same, started late, with a router that ignores the script's popstate: Home must really show, not just the URL
+    {
+      const { ctx, page } = await newPage(browser, { storage: { ignorePopstate: '1' }, late: 300 }); // late: the page is already drawn
+      await page.goto(BASE + '/explore/people/'); await sleep(3000);
+      if (new URL(page.url()).pathname !== '/' || !(await visible(page, '#feed'))) fail('S25b', `the people page is still on screen under url=${page.url()}`);
       await ctx.close();
     }
     // S26 Home never goes blank: a suggestions unit that arrives before any post in its column hides only itself
@@ -478,6 +497,36 @@ async function main() {
       await page.goto(BASE + '/direct/t/1/'); await sleep(12500);
       const n = await page.evaluate(() => document.querySelectorAll('#threadhead [role="button"][aria-label="Video call"]').length);
       if (n !== 1) fail('S35', `after the header re-rendered at 11 s, ${n} Video call buttons`);
+      await ctx.close();
+    }
+    // S36 started late (after the page loaded, as on the phone): the call page still gets the Mac identity and the open
+    // gate, the inbox its bar, Home loses its ads
+    {
+      const where = async (page, sel) => page.evaluate((s) => { const e = document.querySelector(s), r = e.getBoundingClientRect(), h = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return r.left >= 0 && r.right <= innerWidth + 1 && !!h && (h === e || e.contains(h)); }, sel);
+      let { ctx, page } = await newPage(browser, { late: 300 });
+      await page.goto(BASE + '/call/?has_video=false&ig_thread_id=1&pre=1'); await sleep(1500);
+      const st = await page.evaluate(() => ({ ua: document.documentElement.dataset.focusCallUa, gate: document.documentElement.dataset.focusCallGate }));
+      if (st.ua !== 'late' || st.gate !== 'patched') fail('S36', `late start on the call page: identity ${st.ua}, gate ${st.gate} (expected late, patched)`);
+      if (!(await where(page, '#startcall'))) fail('S36', 'late start on the call page: Start call cannot be tapped');
+      await ctx.close();
+      ({ ctx, page } = await newPage(browser, { late: 300 }));
+      await page.goto(BASE + '/direct/inbox/'); await sleep(1300);
+      await checkTabs(page, 'S36', 'late start inbox');
+      await page.goto(BASE + '/'); await sleep(1300);
+      if (await visible(page, 'article[data-id="2"]')) fail('S36', 'late start on Home: the sponsored post is visible');
+      await ctx.close();
+    }
+    // S37 a reel that opens paused is started (muted), and only the one on screen, not the next one preloaded below it
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(500);
+      await page.evaluate(() => { window.__played = []; const play = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function () { window.__played.push([...document.querySelectorAll('#oviewer video')].indexOf(this)); return play.call(this); }; });
+      await page.evaluate(() => document.getElementById('reelcard').scrollIntoView());
+      await page.click('#reelcard'); await sleep(1600);
+      const played = await page.evaluate(() => [...new Set(window.__played)].join());
+      if (played !== '0') fail('S37', `play() called on overlay videos [${played}], expected only the one on screen [0]`);
       await ctx.close();
     }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock

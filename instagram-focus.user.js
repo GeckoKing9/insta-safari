@@ -165,7 +165,8 @@
   const recheckLock = () => {
     clearTimeout(recheckTimer);
     const apply = () => {
-      lockSwipe(CFG.singleReelOnly && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
+      // never on the call page: a video call's big video in its scrolling box is not a reel (it would block the call's drags)
+      lockSwipe(CFG.singleReelOnly && !onCallPage && (isReelPage(location.pathname) || (document.querySelector('video') !== null && overlayReel())));
       if (locked) pin(); // a box that appeared while already locked is pinned now, not at the next tick
     };
     apply(); // and again after the overlay has laid out, and once more for a slow opening animation
@@ -177,7 +178,7 @@
   // starting those too makes them audible once the sound is turned on.
   const onScreen = (v) => { const r = v.getBoundingClientRect(); return r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
   const nudgePlay = (v) => {
-    if (!CFG.autoPlayReels) return;
+    if (!CFG.autoPlayReels || onCallPage) return; // the call page plays its own videos
     const tryPlay = () => { if (v.isConnected && v.paused && v.muted && isFullscreenVideo(v) && onScreen(v)) { v.play().catch(() => { /* refused (Low Power Mode, or not ready): Instagram's own play button still works */ }); } };
     v.addEventListener('loadeddata', tryPlay, { once: true });
     setTimeout(tryPlay, 300); setTimeout(tryPlay, 1200);

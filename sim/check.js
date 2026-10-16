@@ -409,6 +409,12 @@ async function main() {
       const marks = await page.evaluate(() => [document.documentElement.dataset.focusCallUa, getComputedStyle(document.documentElement).touchAction,
         [...document.styleSheets].length]);
       if (marks[0] !== 'early') fail('S31', `the override is marked "${marks[0]}", expected "early" (before Instagram's first script)`);
+      // a video call's big remote video sits in a scrolling box: the reel lock must stay off on the call page
+      await page.evaluate(() => { const box = document.createElement('div'); box.id = 'callvideo'; box.style.cssText = 'position:fixed;inset:0;overflow:auto;z-index:-1';
+        box.innerHTML = '<video muted playsinline style="display:block;width:100%;height:96vh"></video><div style="height:300px"></div>'; document.body.append(box); });
+      await sleep(700);
+      if (await page.evaluate(() => document.documentElement.hasAttribute('data-focus-locked'))) fail('S31', 'the reel swipe lock engaged on the call page (a video call\'s video is not a reel)');
+      await page.evaluate(() => document.getElementById('callvideo').remove());
       // the call page keeps its own :hover (Instagram's desktop call controls appear on hover of the call stage)
       const live = await page.evaluate(() => [...document.styleSheets].flatMap((sh) => [...sh.cssRules]).some((r) => r.selectorText === '#stage:hover #controls'));
       if (!live) fail('S31', 'the one-tap :hover rewrite ran on the call page (its hover-revealed controls would never show)');

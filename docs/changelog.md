@@ -1,5 +1,14 @@
 # Changelog
 
+## v22 = release v0.4.1 (2026-10-16)
+- Final review, with tests for how the phone actually starts the script: Userscripts often starts it after the page has loaded, and the harness only ever started it early. Started late, two things broke and now don't:
+  - The call screen was fitted only at its next DOM change, so a call screen that had settled kept Start call off the edge. It is now fitted as soon as the script starts.
+  - The "Suggested for you" people page (reached by a typed URL or Back) could stay on screen under a Home URL when Instagram's router ignored the in-place switch. It now reloads to Home, like the other two redirects.
+- Lighter: a page is routed on a path change only (a carousel's `?img_index` is not a new page); the fallback poll wakes once a second instead of three times; the call screen is re-fitted only when a button or a video tile arrives, not on every icon or timer change during a call; a late start routes once instead of twice.
+- Checked and left alone, with numbers from the phone: the `:hover` rewrite (Instagram's 16,156-rule sheet never grew across page changes; a full pass is 4-12 ms), the hidden-tab climb (one Reels link on Home, 3 levels, under 0.1 ms), Instagram's menu dialog (no backdrop, no scroll lock, so hiding an app-prompt dialog leaves nothing behind), one walk per added node (a whole Home page is 1,436 elements).
+- MIT license.
+- Harness S21d (a light/dark switch keeps the signed-in account on the Profile tab), S25b (people page, started late, router ignoring the switch), S36 (started late: call page identity, gate and fit; inbox bar; Home ads), S37 (a paused reel is started, only the one on screen).
+
 ## v21 = release v0.4 (2026-10-15)
 - Calls (`calls`): Audio and Video call buttons in a DM conversation's header, opening Instagram's call page for that conversation in a new tab, like its desktop buttons. On the call page only, Instagram's code is told it runs in Mac Safari before any of its scripts (its gate allows desktop Safari 16+; iPhone Safari reads as Mobile Safari, so "Start call" could not reach anyone). The page's script policy is nonce-only, so the override borrows the nonce of Instagram's first script. Measured on the phone: no call buttons on mobile web, the gate closed in the call tab, the conversation id equal to the call's `ig_thread_id`.
 - Measured on the phone: Userscripts starts the script late on the call page, after Instagram has computed its call gate from the iPhone identity (`isSupportedOutboundClient` false: Start call could not reach anyone). Instagram looks its gate functions up on the module at each use, so the two closed ones are replaced once the module exists; on the phone the gate then reads open (outbound and client true).

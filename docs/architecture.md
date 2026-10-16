@@ -6,7 +6,7 @@ instagram.com (content world, no frames). Everything is a toggle in `CFG`. No bu
 ## Sections of the script
 
 1. **Routing.** Instagram is a single-page app. `route()` runs at start and on every URL change (from the
-   mutation observer, so a page is routed before it paints, plus a 300 ms poll). It redirects the Reels feed,
+   mutation observer, so a page is routed before it paints, plus a 1 s poll; the path only, not the query). It redirects the Reels feed,
    sends the search tab (`/explore/`) to the search page, sets the `data-focus-*` attributes the CSS keys on,
    and resyncs the lock, the tab bar and the `:hover` rewrite.
 2. **Swipe lock.** Engaged by URL (`/reel/ID`, `/reels/ID`, `/user/reel/ID`) or by content (a near-fullscreen
@@ -41,6 +41,7 @@ instagram.com (content world, no frames). Everything is a toggle in `CFG`. No bu
    page, so once its module exists the two closed gate functions (`isSupportedClient`, `isSupportedOutboundClient`)
    are replaced; they are looked up on the module at each use. Part 3 fits the desktop call screen (a 1024 px row) to
    the phone: ancestors of buttons wider than the screen fit it, rows of panels stack, rows of small controls stay.
+   It runs when the page is routed (a late start finds the screen already drawn) and again when buttons or videos are added.
    The reel lock and autoplay nudge stay off on the call page.
 
 The script runs once per page even if installed twice, and has no debug code (removed in v20; v19 has the on-screen

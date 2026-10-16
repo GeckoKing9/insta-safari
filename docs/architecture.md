@@ -37,7 +37,11 @@ instagram.com (content world, no frames). Everything is a toggle in `CFG`. No bu
    Instagram's first script tag (the page allows only nonce'd scripts); `data-focus-call-ua` records whether that ran
    early or late. The one-tap changes stay off there. Part 2 adds Audio / Video call buttons to a conversation's header
    on phone layouts; they read the conversation id at the tap and open `/call/?has_video=...&ig_thread_id=<id>` in a new
-   tab, as Instagram's desktop buttons do.
+   tab, as Instagram's desktop buttons do. Instagram computes its call gate once, before the script runs on the call
+   page, so once its module exists the two closed gate functions (`isSupportedClient`, `isSupportedOutboundClient`)
+   are replaced; they are looked up on the module at each use. Part 3 fits the desktop call screen (a 1024 px row) to
+   the phone: ancestors of buttons wider than the screen fit it, rows of panels stack, rows of small controls stay.
+   The reel lock and autoplay nudge stay off on the call page.
 
 The script runs once per page even if installed twice, and has no debug code (removed in v20; v19 has the on-screen
 event log if it is ever needed again).

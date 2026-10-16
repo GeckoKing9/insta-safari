@@ -9,7 +9,7 @@ What it does, out of the box:
 - No ads, no "Suggested for you" accounts (the home carousel and the list at the bottom of notifications), no "open the app" prompts.
 - Four evenly spaced tabs at the bottom (Home, Search, Messages, Profile), and they stay on the DM inbox, where Instagram shows none.
 - One tap opens things. Safari treats a tap as a hover first, and Instagram's hover extras made some taps (a post shared in a DM) need a second one.
-- Audio and video calls from a DM conversation. Instagram's web calling is desktop-only, though iPhone Safari can run it; the script adds the two call buttons to the conversation header and lets the call page start. Calls go out; incoming calls still ring in the app only. Keep "Request Desktop Website" off, it isn't needed.
+- Audio and video calls from a DM conversation. Instagram's web calling is desktop-only, though iPhone Safari runs it fine; the script adds the two call buttons to the conversation header, lets the call page start, and fits Instagram's desktop call screen to the phone. Tested with a real audio call and a real video call. Calls go out; incoming calls still ring in the app only. Keep "Request Desktop Website" off, it isn't needed.
 
 Recommended posts in the feed are kept (the feed is mostly those once you're caught up). Every behaviour is a line in `CFG` at the top of the script, except two small layout fixes that are always on: no double-tap zoom, and the tab bar sitting above the search results.
 

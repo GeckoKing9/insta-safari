@@ -31,6 +31,14 @@ instagram.com (content world, no frames). Everything is a toggle in `CFG`. No bu
    `any-hover: none` every `:hover` selector in Instagram's sheets is rewritten to `:hover:not(*)`, checked again on
    every touch, page change and new stylesheet.
 
+7. **Calls.** Instagram's web calling is gated in its code to desktop browsers on a list that includes Safari 16+.
+   Part 1 runs first, on the call page only (`/call/`, a new tab): before any of Instagram's scripts, it tells the
+   page's code it runs in Mac Safari (userAgent, appVersion, platform), with a script that borrows the nonce of
+   Instagram's first script tag (the page allows only nonce'd scripts); `data-focus-call-ua` records whether that ran
+   early or late. The one-tap changes stay off there. Part 2 adds Audio / Video call buttons to a conversation's header
+   on phone layouts; they read the conversation id at the tap and open `/call/?has_video=...&ig_thread_id=<id>` in a new
+   tab, as Instagram's desktop buttons do.
+
 The script runs once per page even if installed twice, and has no debug code (removed in v20; v19 has the on-screen
 event log if it is ever needed again).
 

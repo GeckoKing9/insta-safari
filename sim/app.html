@@ -37,6 +37,7 @@
     follow: 'Follow', thisWeek: 'This week', seeAll: 'See All Suggestions',
   };
   window.__advanced = false; window.__dmTouch = false; window.__liked = false; window.__renders = 0;
+  window.__opened = []; window.open = (u, t) => { window.__opened.push(`${u}|${t}`); return null; }; // records new-tab opens
   window.__doc = Math.random(); // survives in-page navigation, lost on a full reload
 
   // The bottom tab bar as Instagram builds it (measured on the phone 2026-10-15): a fixed 50 px bar holding a
@@ -130,7 +131,11 @@
       msgs += `<div class="msg rowfirst" style="height:40px">message just before the shared post</div>`;
       msgs += `<div role="group" id="sharedmsg" class="rowmarker" style="min-height:120px"><a data-spa id="sharedpost" href="/p/S1/" style="display:block;height:100px">post shared by Marie</a>
         <div id="msgactions" style="visibility:hidden"><span>React</span> <span>Reply</span></div><div id="msgtext" style="height:40px">caption under the post</div><div id="sharedcaption" style="height:30px;cursor:pointer">sistosterone: open the post</div><div id="cssactions">More</div></div>`;
-      return `<main id="dm"><div style="height:40px">Marie</div><div id="dmlist">${msgs}</div></main>`;
+      // the thread header on the mobile site: Back, the name, Conversation information; no call buttons (desktop-only)
+      return `<main id="dm"><div id="threadhead" style="height:40px;display:flex;align-items:center;justify-content:space-between">
+        <div role="button" aria-label="Back">&lt;</div><span>Marie</span><div id="infowrap"><div role="button" id="infobtn">
+        <svg aria-label="Conversation information" width="24" height="24" viewBox="0 0 24 24"><title>Conversation information</title><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"/></svg></div></div></div>
+        <div id="dmlist">${msgs}</div></main>`;
     },
     reel(id) {
       // native vertical scroller holding the current reel and the next one, like Instagram's reel feed

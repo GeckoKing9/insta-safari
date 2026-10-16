@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Focus
 // @namespace    https://github.com/GeckoKing9/insta-safari
-// @version      20
+// @version      21
 // @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested accounts or "open the app" prompts; four even tabs, one tap per action. Toggles below.
 // @homepageURL  https://github.com/GeckoKing9/insta-safari
 // @updateURL    https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js
@@ -29,6 +29,7 @@
     hideAppPrompts: true,       // "Open in app" banners, links to the Instagram app, Safari's Smart App Banner
     inboxTabBar: true,          // the four tabs stay at the bottom of the DM inbox (Instagram shows none there)
     oneTap: true,               // a tap on something you can open is never taken as a hover first (a post shared in a DM needed two taps)
+    calls: true,                // audio and video call buttons in DM conversations (Instagram's web calls, desktop-only, made to work)
   };
   const WORDS = {
     sponsored: ['Sponsored', 'Sponsorisé', 'Commandité', 'Publicité'],
@@ -42,7 +43,40 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '20'; // keep equal to @version above: Userscripts offers an update only when @version grows
+  const SITE_VERSION = '21'; // keep equal to @version above: Userscripts offers an update only when @version grows
+
+  // 7. Calls, part 1 (first, before the page parses any script). Instagram's web calls (its /call/ page, opened in a
+  // new tab) start only when its code believes the browser is a desktop one on its list, which includes Safari 16+.
+  // iPhone Safari is the same WebKit but reads as "Mobile Safari" on iOS (measured on the phone 2026-10-15: gate
+  // closed; with "Request Desktop Website" it opened, but desktop mode does not reach the new call tab and makes the
+  // rest of Instagram awkward). So on the call page only, Instagram's code is told it runs in Mac Safari. The page
+  // allows only scripts that carry its nonce, so the override borrows the nonce of Instagram's first script tag and
+  // runs before it: the parser runs pending microtasks (this observer) before it executes a script.
+  const onCallPage = /^\/(call|groupcall)\//.test(location.pathname); // a full page of its own (a new tab), never reached in place
+  if (CFG.calls && onCallPage) {
+    const version = (navigator.userAgent.match(/Version\/([\d.]+)/) || [])[1] || '26.0';
+    const mac = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Safari/605.1.15`;
+    const code = `(() => { for (const [k, v] of ${JSON.stringify([['userAgent', mac], ['appVersion', mac.slice(8)], ['platform', 'MacIntel']])})
+      Object.defineProperty(Navigator.prototype, k, { get: () => v, configurable: true }); })();`;
+    const inject = (nonce, when) => {
+      const tag = document.createElement('script');
+      tag.nonce = nonce; tag.textContent = code; // runs in the page, where Instagram's code reads navigator
+      (document.head || document.documentElement).prepend(tag); tag.remove();
+      document.documentElement.dataset.focusCallUa = when; // "early" = before any of Instagram's scripts ran
+    };
+    const first = document.querySelector('script[nonce]');
+    // late: Userscripts started us after the parser had run a script; Instagram reads navigator when its call code
+    // first runs, from its bundles, so this usually still precedes it (the phone check reads the mark)
+    if (first) inject(first.nonce, 'late');
+    else {
+      const watch = new MutationObserver((muts) => {
+        for (const m of muts) for (const n of m.addedNodes) if (n.nodeName === 'SCRIPT' && n.nonce) { watch.disconnect(); inject(n.nonce, 'early'); return; }
+      });
+      watch.observe(document, { childList: true, subtree: true });
+      // no nonce'd script at all: a page without that policy, where a plain inline script runs
+      document.addEventListener('DOMContentLoaded', () => { if (!document.documentElement.dataset.focusCallUa) { watch.disconnect(); inject('', 'no-nonce'); } }, { once: true });
+    }
+  }
 
   // At document-start the <html> element may not exist yet; wait for it instead of crashing
   const onRoot = (fn) => document.documentElement ? fn()
@@ -76,6 +110,8 @@
     if (firstLoad && CFG.followingFeed && p === '/' && !location.search.includes('variant=')) { location.replace('/?variant=following'); return; }
     recheckLock();
     syncTabs();
+    callsUntil = performance.now() + 10000; // the conversation header renders late: look for it on changes for 10 s
+    syncCalls();
     unhoverSheets(); // a new page may have brought rules (cheap: unchanged sheets are skipped)
   };
   let last = location.href;
@@ -346,6 +382,39 @@
     if (!bar?.isConnected) return;
     const fresh = buildBar(); bar.replaceWith(fresh); bar = fresh;
   });
+  // 7. Calls, part 2: Audio / Video call buttons in a DM conversation's header (Instagram shows its own only on desktop),
+  // opening its call page for this conversation in a new tab, as its desktop buttons do. The conversation id in the
+  // URL is the call's ig_thread_id (checked on the phone). Icons: Instagram's own (measured on its desktop header).
+  const CALL_ICONS = {
+    audio: [['path', { d: 'M18.227 22.912c-4.913 0-9.286-3.627-11.486-5.828C4.486 14.83.731 10.291.921 5.231a3.289 3.289 0 0 1 .908-2.138 17.116 17.116 0 0 1 1.865-1.71 2.307 2.307 0 0 1 3.004.174 13.283 13.283 0 0 1 3.658 5.325 2.551 2.551 0 0 1-.19 1.941l-.455.853a.463.463 0 0 0-.024.387 7.57 7.57 0 0 0 4.077 4.075.455.455 0 0 0 .386-.024l.853-.455a2.548 2.548 0 0 1 1.94-.19 13.278 13.278 0 0 1 5.326 3.658 2.309 2.309 0 0 1 .174 3.003 17.319 17.319 0 0 1-1.71 1.866 3.29 3.29 0 0 1-2.138.91 10.27 10.27 0 0 1-.368.006Zm-13.144-20a.27.27 0 0 0-.167.054A15.121 15.121 0 0 0 3.28 4.47a1.289 1.289 0 0 0-.36.836c-.161 4.301 3.21 8.34 5.235 10.364s6.06 5.403 10.366 5.236a1.284 1.284 0 0 0 .835-.36 15.217 15.217 0 0 0 1.504-1.637.324.324 0 0 0-.047-.41 11.62 11.62 0 0 0-4.457-3.119.545.545 0 0 0-.411.044l-.854.455a2.452 2.452 0 0 1-2.071.116 9.571 9.571 0 0 1-5.189-5.188 2.457 2.457 0 0 1 .115-2.071l.456-.855a.544.544 0 0 0 .043-.41 11.629 11.629 0 0 0-3.118-4.458.36.36 0 0 0-.244-.1Z' }]],
+    video: [['rect', { ...LINE, height: '18', rx: '3', width: '16.999', x: '1', y: '3' }],
+      ['path', { ...LINE, d: 'm17.999 9.146 2.495-2.256A1.5 1.5 0 0 1 23 8.003v7.994a1.5 1.5 0 0 1-2.506 1.113L18 14.854' }]],
+  };
+  const INFO = 'svg[aria-label="Conversation information"], svg[aria-label="Informations sur la conversation"]';
+  let callRow = null, callsUntil = 0;
+  const threadId = () => (/^\/direct\/t\/(\d+)\/?$/.exec(location.pathname) || [])[1];
+  const call = (video) => { const id = threadId(); if (id) window.open(`/call/?has_video=${video}&ig_thread_id=${id}`, '_blank'); };
+  const syncCalls = () => {
+    if (!threadId()) { callRow?.remove(); return; } // the header may outlive the conversation
+    if (!CFG.calls || !phoneLayout() || callRow?.isConnected) return;
+    if (document.querySelector('svg[aria-label="Audio call"], svg[aria-label="Video call"]')) return; // Instagram's own (desktop)
+    let slot = document.querySelector(INFO)?.closest('[role="button"], button, a');
+    while (slot?.parentElement && slot.parentElement.childElementCount === 1) slot = slot.parentElement; // up to the header row
+    if (!slot?.parentElement) return;
+    callRow = document.createElement('div');
+    callRow.style.cssText = 'display:flex;align-items:center';
+    for (const [label, video] of [['Audio call', false], ['Video call', true]]) {
+      const b = document.createElement('div');
+      b.setAttribute('role', 'button'); b.setAttribute('aria-label', label); b.tabIndex = 0;
+      b.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;cursor:pointer;color:inherit;-webkit-tap-highlight-color:transparent';
+      b.append(icon(video ? CALL_ICONS.video : CALL_ICONS.audio, label));
+      // the conversation is read at the tap: Instagram may keep this header while moving to another conversation
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); call(video); });
+      b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); call(video); } });
+      callRow.append(b);
+    }
+    slot.parentElement.insertBefore(callRow, slot);
+  };
   const TAB_LINKS = 'a[href="/"], a[href="/reels/"], a[href="/explore/"], a[href="/direct/inbox/"]';
   const touchesTabs = (n) => n.nodeType === 1 && !n.closest?.('#focus-tabbar') && (n.matches(TAB_LINKS) || !!n.querySelector(TAB_LINKS) || !!n.closest?.(TAB_LINKS));
 
@@ -466,6 +535,7 @@
     }
     if (videoChange) recheckLock();
     if (tabsChanged || inboxPending()) syncTabs();
+    if (CFG.calls && !callRow?.isConnected && performance.now() < callsUntil) syncCalls();
     if (onNotifs()) notifPass();
     if (document.styleSheets.length !== sheetCount) { sheetCount = document.styleSheets.length; unhoverSheets(); } // a <style> came or went
     if (pending.size && !flushTimer) flushTimer = setTimeout(flush, 100);
@@ -483,7 +553,7 @@
   // :hover in Instagram's stylesheets is rewritten never to match: the page behaves as if nothing were ever hovered,
   // :not(:hover) and :has(:hover) included.
   let unhoverSheets = () => {};
-  if (CFG.oneTap) {
+  if (CFG.oneTap && !onCallPage) { // the call page's desktop controls appear on hover: left as Instagram made them
     let fingerAt = -Infinity;
     for (const t of ['touchstart', 'touchend']) addEventListener(t, () => { fingerAt = performance.now(); unhoverSheets(); }, { capture: true, passive: true });
     addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') fingerAt = -Infinity; }, { capture: true, passive: true });

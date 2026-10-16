@@ -371,6 +371,51 @@ async function main() {
       if (await page.evaluate(() => !!document.getElementById('focus-tabbar'))) fail('S29', 'phone tab bar drawn on an iPad-width layout');
       await ctx.close();
     }
+    // S30 calls: a DM thread gets Audio and Video call buttons (Instagram shows them on desktop only) that open
+    // Instagram's call page for this thread in a new tab, like its desktop buttons do
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(600);
+      const order = await page.evaluate(() => [...document.querySelectorAll('#threadhead [aria-label]')].map((e) => e.getAttribute('aria-label')).join(','));
+      if (!/Audio call.*Video call.*Conversation information/.test(order)) fail('S30', `thread header is ${order}, expected Audio call and Video call before Conversation information`);
+      for (const [label, video] of [['Audio call', 'false'], ['Video call', 'true']]) {
+        await page.evaluate(() => { window.__opened = []; });
+        await tapOr(page, `#threadhead [role="button"][aria-label="${label}"]`, 'S30'); await sleep(200);
+        const opened = await page.evaluate(() => window.__opened.join(' '));
+        if (opened !== `/call/?has_video=${video}&ig_thread_id=1|_blank`) fail('S30', `${label} opened "${opened}"`);
+      }
+      // another conversation, reached in place: its own id, never the previous person's
+      await page.evaluate(() => { history.pushState(null, '', '/direct/t/2/'); window.dispatchEvent(new PopStateEvent('popstate')); }); await sleep(600);
+      await page.evaluate(() => { window.__opened = []; });
+      await tapOr(page, '#threadhead [role="button"][aria-label="Video call"]', 'S30'); await sleep(200);
+      const second = await page.evaluate(() => window.__opened.join(' '));
+      if (second !== '/call/?has_video=true&ig_thread_id=2|_blank') fail('S30', `after moving to conversation 2, Video call opened "${second}"`);
+      // keyboard: Enter on a focused call button
+      await page.evaluate(() => { window.__opened = []; document.querySelector('#threadhead [aria-label="Audio call"]').focus(); });
+      await page.keyboard.press('Enter'); await sleep(200);
+      if (!(await page.evaluate(() => window.__opened.length))) fail('S30', 'Enter on a focused call button did nothing');
+      await page.goto(BASE + '/direct/inbox/'); await sleep(600);
+      if (await page.evaluate(() => !!document.querySelector('[aria-label="Audio call"]'))) fail('S30', 'call buttons outside a thread');
+      await ctx.close();
+    }
+    // S31 the call page believes it runs in Mac Safari before Instagram's first script (its gate allows desktop
+    // Safari 16+ only), despite a nonce-only script policy; other pages keep the real user agent
+    {
+      const { ctx, page } = await newPage(browser);
+      await page.goto(BASE + '/call/?has_video=false&ig_thread_id=1'); await sleep(600);
+      const seen = await page.evaluate(() => [window.__uaAtFirstScript, window.__platformAtFirstScript]);
+      if (!/Macintosh/.test(seen[0] || '') || /iPhone|Mobile\//.test(seen[0] || '')) fail('S31', `call page's first script saw "${seen[0]}"`);
+      if (seen[1] !== 'MacIntel') fail('S31', `call page's first script saw platform "${seen[1]}"`);
+      const marks = await page.evaluate(() => [document.documentElement.dataset.focusCallUa, getComputedStyle(document.documentElement).touchAction,
+        [...document.styleSheets].length]);
+      if (marks[0] !== 'early') fail('S31', `the override is marked "${marks[0]}", expected "early" (before Instagram's first script)`);
+      // the call page keeps its own :hover (Instagram's desktop call controls appear on hover of the call stage)
+      const live = await page.evaluate(() => [...document.styleSheets].flatMap((sh) => [...sh.cssRules]).some((r) => r.selectorText === '#stage:hover #controls'));
+      if (!live) fail('S31', 'the one-tap :hover rewrite ran on the call page (its hover-revealed controls would never show)');
+      await page.goto(BASE + '/'); await sleep(500);
+      if (!(await page.evaluate(() => /iPhone/.test(navigator.userAgent)))) fail('S31', 'the Mac user agent leaked outside the call page');
+      await ctx.close();
+    }
     // S17 a reel linked as /username/reel/ID/ (Instagram's newer grid links) gets the same lock
     {
       const { ctx, page } = await newPage(browser);

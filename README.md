@@ -9,6 +9,7 @@ What it does, out of the box:
 - No ads, no "Suggested for you" accounts (the home carousel and the list at the bottom of notifications), no "open the app" prompts.
 - Four evenly spaced tabs at the bottom (Home, Search, Messages, Profile), and they stay on the DM inbox, where Instagram shows none.
 - One tap opens things. Safari treats a tap as a hover first, and Instagram's hover extras made some taps (a post shared in a DM) need a second one.
+- Audio and video calls from a DM conversation. Instagram's web calling is desktop-only, though iPhone Safari can run it; the script adds the two call buttons to the conversation header and lets the call page start. Calls go out; incoming calls still ring in the app only. Keep "Request Desktop Website" off, it isn't needed.
 
 Recommended posts in the feed are kept (the feed is mostly those once you're caught up). Every behaviour is a line in `CFG` at the top of the script, except two small layout fixes that are always on: no double-tap zoom, and the tab bar sitting above the search results.
 
@@ -38,7 +39,7 @@ Recommended posts in the feed are kept (the feed is mostly those once you're cau
 |---|---|
 | `instagram-focus.user.js` | the script; settings in `CFG` at the top |
 | `releases/` | tagged releases: `v0.1` first live version, `v0.2` after the first review, `v0.3` search back, four even tabs everywhere, one tap per action |
-| `sim/check.js`, `sim/app.html`, `sim/server.py` | headless-Chromium test harness: scenarios S0 to S29 against a model of Instagram's mobile site (tab bar, inbox, search page, DM messages), built from measurements on a real phone (`node sim/check.js`, about a minute) |
+| `sim/check.js`, `sim/app.html`, `sim/call.html`, `sim/server.py` | headless-Chromium test harness: scenarios S0 to S31 against a model of Instagram's mobile site (tab bar, inbox, search page, DM messages, the call page under its nonce-only script policy), built from measurements on a real phone (`node sim/check.js`, about a minute) |
 | `sim/device_check.py`, `sim/checkall.sh` | the tab-bar, inbox and search checks on a real iPhone; `checkall.sh` runs the harness and the phone and exits 0 only when both pass |
 | `sim/probe.py`, `sim/evaljs.py` | a real screenshot of the phone's tab (Web Inspector `Page.snapshotRect`) with the tab-bar layout; run a JS file in the tab |
 | `sim/device-attach.sh` | hands the iPhone from Windows to WSL (usbipd-win) |
@@ -68,6 +69,7 @@ Rollback: `git checkout v0.2 -- instagram-focus.user.js`, then step 3.
 - Userscripts shows "version null" until its per-site prompt is accepted in the tab. A hand injection working while the extension stays silent means permission, not code.
 - `/reel/ID` is a standalone single-video page; `/reels/ID` is the endless feed scroller. Both get the lock. Search results and profile grids open videos as single pages (`/p/ID`, `/user/reel/ID`).
 - Instagram's router renders a route on a `popstate` event, so the script can switch tabs without a reload.
+- Web calls are gated in Instagram's code: on only for a desktop browser on its list (Chrome, Edge, Firefox, Safari 16+). iPhone Safari reads as "Mobile Safari", so mobile web shows no call buttons and its call page can't start a call. "Request Desktop Website" opens the gate for that tab, but the call opens in a new tab without it. The script tells the call page alone that it runs in Mac Safari; the page only allows scripts carrying its nonce, so that override borrows the nonce of Instagram's first script.
 - On the search page Instagram's results list sits in a layer above its own tab bar, and DM message rows reveal React / Reply / More on hover, through both a hover handler and `:hover` CSS. Both cost taps on a phone.
 - Never start `usbmuxd` by hand: Ubuntu's socket-activated one grabs the phone by itself, and two daemons fighting over the interface (`LIBUSB_ERROR_BUSY`) kill the USB link.
 - Web Inspector probes stall while the phone is locked; file transfers still work. A probe that hangs the page can drop the USB link; re-attach after any timeout.

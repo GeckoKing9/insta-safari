@@ -21,6 +21,6 @@ the screen is touched (the test call ended cleanly); the pre-v0.3 git history
 has a DM thread id and a few rule-breaking commits that would need a force-push to clean.
 
 <!-- session-end:auto -->
-**Last session (2026-10-16, coding):** Restored Instagram search tab, fixed tab bar and double taps, enabled mobile calls and video calls in Safari, and shipped v0.4.1 under the MIT license. The phone runs a byte-identical build.
+**Last session (2026-11-09, coding):** Fixed 1:1 DM calls: the call page now gets Instagram's thread id from the route object (v0.4.2 = v25). Harness and device tests pass, and the owner confirmed calls work. Added a data-focus-call-id probe.
 **Next:** none
 <!-- /session-end:auto -->

@@ -1,16 +1,19 @@
 # Project status
 
-**2026-10-16: v0.4.1 (= v22) released, MIT licensed.** Checked on the iPhone: the copy Userscripts injects is
-byte-for-byte v22; DEVICE PASS; the call buttons are in a conversation's header; the call screen opens with the gate
-patched and Start call plus its four preview controls tappable (no call placed). The real audio and video calls were
-made on v0.4; v22 changed when the call screen is fitted and how pages are routed, not the call itself.
+**2026-11-09: v0.4.2 (= v25) released.** Calls to 1:1 chats work again: the call buttons opened Instagram's call
+page on "Page not found" for a friend's 1:1 chat because they passed the URL's thread key; they now pass Instagram's
+IG thread id, read from its React tree at the tap. Checked on the iPhone: the installed copy is byte-for-byte v25;
+DEVICE PASS; the call button's lookup reports `igid` from the real script world; the call page for that id shows
+"Ready to call?" with Start call tappable, for the 1:1 chat and for a group. No call was placed in testing; the owner
+places the first real one.
 
-How calls work: the conversation header gets Audio / Video call buttons; the call page is told it runs in Mac
-Safari and Instagram's outbound call gate is opened (it is computed before the script can act); its desktop layout
-is fitted to the phone. Incoming calls still ring only in the app.
+How calls work: the conversation header gets Audio / Video call buttons, which open the call page with the IG
+thread id; the call page is told it runs in Mac Safari and Instagram's outbound call gate is opened (it is computed
+before the script can act); its desktop layout is fitted to the phone. Incoming calls still ring only in the app.
 
-Getting the script onto the phone: the USB file push can hang and wipe the installed file (it did on 2026-10-15).
-Install from the raw GitHub URL with Userscripts' Install button instead; see the project memory.
+Getting the script onto the phone: never the USB file push; it hung and emptied the installed file on 2026-10-15
+and again on 2026-11-09 with a healthy link. Install from the raw GitHub URL (commit-pinned while testing) with
+Userscripts' Install button.
 
 Known limits (see the brief): English and French labels only; iPad, desktop and landscape not targeted; the in-call
 controls (mute, camera, end) were hidden whenever the monitor sampled them, likely Instagram auto-hiding them until

@@ -11,8 +11,9 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
-        # tt=1: the page also enforces Trusted Types (assigning script text throws without a policy)
-        if call: self.send_header("Content-Security-Policy", "script-src 'nonce-t3st' 'self'" + ("; require-trusted-types-for 'script'" if "tt=1" in self.path else ""))
+        # every Instagram page allows only scripts carrying its nonce (measured on the DM pages 2026-11-09)
+        # tt=1 (call page): it also enforces Trusted Types (assigning script text throws without a policy)
+        self.send_header("Content-Security-Policy", "script-src 'nonce-t3st' 'self'" + ("; require-trusted-types-for 'script'" if call and "tt=1" in self.path else ""))
         self.end_headers()
         self.wfile.write(CALL if call else PAGE)
     def log_message(self, *a): pass

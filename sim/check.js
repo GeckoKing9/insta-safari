@@ -15,14 +15,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // cfg: CFG lines to flip, e.g. { 'hideSearch: false,': 'hideSearch: true,' }; a line that is not in the script fails loudly
 // late: start the script that many ms after the page's load event (Userscripts on the phone often starts it after the parser)
-async function newPage(browser, { script = true, storage = {}, cfg = {}, device = 'iPhone 15 Pro Max', copies = 1, late = 0 } = {}) {
+// world: run the script in that isolated world (CDP), as Userscripts does on the phone (@inject-into content)
+async function newPage(browser, { script = true, storage = {}, cfg = {}, device = 'iPhone 15 Pro Max', copies = 1, late = 0, world = '' } = {}) {
   const ctx = await browser.newContext({ ...devices[device], locale: 'en-CA' });
   await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);
   let src = SCRIPT;
   for (const [from, to] of Object.entries(cfg)) { if (!src.includes(from)) throw new Error(`CFG line not found: ${from}`); src = src.replace(from, to); }
   if (late) src = `addEventListener('load', () => setTimeout(() => {\n${src}\n}, ${late}));`;
-  if (script) for (let i = 0; i < copies; i++) await ctx.addInitScript(src);
+  if (script && !world) for (let i = 0; i < copies; i++) await ctx.addInitScript(src);
   const page = await ctx.newPage();
+  if (script && world) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Page.enable');
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: src, worldName: world });
+  }
   page.setDefaultTimeout(8000); // a missing target fails its scenario fast instead of stalling 30 s
   // S0 sentinel: any uncaught error in the page (the script's or the fixture's) is a failure
   page.on('pageerror', (e) => fail('S0', `page error: ${e.message.slice(0, 120)}`));
@@ -69,6 +75,8 @@ const checkTabs = async (page, id, where) => {
 };
 const sameDoc = (page, doc) => page.evaluate((d) => window.__doc === d, doc);
 
+// the IG thread id the fixture's React tree gives conversation k (app.html igid), 39 digits like Instagram's
+const IGID = (k) => '3402823668417103' + String(k).padStart(23, '0');
 // a tap that cannot happen (element missing or hidden) is a scenario failure, not a harness crash
 const tapOr = (page, sel, id) => page.click(sel, { timeout: 3000 }).then(() => true, () => { fail(id, `could not tap ${sel}, url=${page.url()}`); return false; });
 
@@ -391,7 +399,9 @@ async function main() {
       await ctx.close();
     }
     // S30 calls: a DM thread gets Audio and Video call buttons (Instagram shows them on desktop only) that open
-    // Instagram's call page for this thread in a new tab, like its desktop buttons do (window.open recorded, not run)
+    // Instagram's call page for this thread in a new tab, like its desktop buttons do (window.open recorded, not run),
+    // with the IG thread id Instagram's own buttons use, read from its React tree (the URL's thread key is "Page not
+    // found" on the call page for a 1:1 chat), never the id of another conversation still mounted
     {
       const { ctx, page } = await newPage(browser, { storage: { stubOpen: '1' } });
       await page.goto(BASE + '/direct/t/1/'); await sleep(600);
@@ -401,20 +411,58 @@ async function main() {
         await page.evaluate(() => { window.__opened = []; });
         await tapOr(page, `#threadhead [role="button"][aria-label="${label}"]`, 'S30'); await sleep(200);
         const opened = await page.evaluate(() => window.__opened.filter((o) => o.includes('/call/')).join(' '));
-        if (!opened.endsWith(`/call/?has_video=${video}&ig_thread_id=1|_blank`)) fail('S30', `${label} opened "${opened}"`);
+        if (!opened.endsWith(`/call/?has_video=${video}&ig_thread_id=${IGID(1)}|_blank`)) fail('S30', `${label} opened "${opened}"`);
+        const how = await page.evaluate(() => document.documentElement.dataset.focusCallId);
+        if (how !== 'igid') fail('S30', `${label}: the lookup reported "${how}", expected igid`);
       }
       // another conversation, reached in place: its own id, never the previous person's
       await page.evaluate(() => { history.pushState(null, '', '/direct/t/2/'); window.dispatchEvent(new PopStateEvent('popstate')); }); await sleep(600);
       await page.evaluate(() => { window.__opened = []; });
       await tapOr(page, '#threadhead [role="button"][aria-label="Video call"]', 'S30'); await sleep(200);
       const second = await page.evaluate(() => window.__opened.filter((o) => o.includes('/call/')).join(' '));
-      if (!second.endsWith('/call/?has_video=true&ig_thread_id=2|_blank')) fail('S30', `after moving to conversation 2, Video call opened "${second}"`);
+      if (!second.endsWith(`/call/?has_video=true&ig_thread_id=${IGID(2)}|_blank`)) fail('S30', `after moving to conversation 2, Video call opened "${second}"`);
       // keyboard: Enter on a focused call button
       await page.evaluate(() => { window.__opened = []; document.querySelector('#threadhead [aria-label="Audio call"]').focus(); });
       await page.keyboard.press('Enter'); await sleep(200);
       if (!(await page.evaluate(() => window.__opened.length))) fail('S30', 'Enter on a focused call button did nothing');
       await page.goto(BASE + '/direct/inbox/'); await sleep(600);
       if (await page.evaluate(() => !!document.querySelector('[aria-label="Audio call"]'))) fail('S30', 'call buttons outside a thread');
+      await ctx.close();
+    }
+    // S30b no IG thread id in the page (Instagram changed its tree): the URL's id, which the call page takes for
+    // some chats; never the id of another chat that has one; started late (as on the phone), the IG thread id is
+    // still read at the tap
+    for (const [opts, want, what, how] of [[{ storage: { stubOpen: '1', noIgid: '1' } }, '1', 'no IG thread id', 'not-found'],
+      [{ storage: { stubOpen: '1', noIgid: 'current' } }, '1', 'only other chats have an IG thread id', 'not-found'],
+      [{ storage: { stubOpen: '1', noReact: '1' } }, '1', 'no React container', 'no-react'],
+      [{ storage: { stubOpen: '1', badNonce: '1' } }, '1', 'the page refuses the lookup script', 'blocked'],
+      [{ storage: { stubOpen: '1' }, late: 300 }, IGID(1), 'late start', 'igid']]) {
+      const { ctx, page } = await newPage(browser, opts);
+      await page.goto(BASE + '/direct/t/1/'); await sleep(900);
+      await page.evaluate(() => { window.__opened = []; });
+      await tapOr(page, '#threadhead [role="button"][aria-label="Audio call"]', 'S30b'); await sleep(200);
+      const opened = await page.evaluate(() => window.__opened.filter((o) => o.includes('/call/')).join(' '));
+      if (!opened.endsWith(`/call/?has_video=false&ig_thread_id=${want}|_blank`)) fail('S30b', `${what}: Audio call opened "${opened}"`);
+      const got = await page.evaluate(() => document.documentElement.dataset.focusCallId);
+      if (got !== how) fail('S30b', `${what}: the lookup reported "${got}", expected ${how}`);
+      await ctx.close();
+    }
+    // S30c on the phone the script runs in an isolated world (@inject-into content), which sees neither React's
+    // expandos nor the page's globals: here too (a CDP isolated world, a real popup) the call gets the IG thread id
+    {
+      const { ctx, page } = await newPage(browser, { world: 'userscript' });
+      await page.goto(BASE + '/direct/t/1/'); await sleep(600);
+      if (await page.evaluate(() => typeof window.__instagramFocus !== 'undefined')) fail('S30c', 'the script is not isolated from the page (its flag is visible there)');
+      const [popup] = await Promise.all([page.waitForEvent('popup', { timeout: 4000 }).catch(() => null),
+        tapOr(page, '#threadhead [role="button"][aria-label="Audio call"]', 'S30c')]);
+      if (!popup) fail('S30c', 'Audio call opened no tab');
+      else {
+        await popup.waitForLoadState('domcontentloaded').catch(() => {});
+        const u = new URL(popup.url());
+        if (u.pathname !== '/call/' || u.searchParams.get('ig_thread_id') !== IGID(1)) fail('S30c', `Audio call opened ${popup.url()}`);
+      }
+      const how = await page.evaluate(() => document.documentElement.dataset.focusCallId);
+      if (how !== 'igid') fail('S30c', `the lookup reported "${how}", expected igid`);
       await ctx.close();
     }
     // S31 the call page believes it runs in Mac Safari before Instagram's first script (its gate allows desktop

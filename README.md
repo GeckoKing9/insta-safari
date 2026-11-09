@@ -56,8 +56,7 @@ Recommended posts in the feed are kept (the feed is mostly those once you're cau
 
 1. Work on a branch. Edit `instagram-focus.user.js` and bump both `@version` in the header and `SITE_VERSION` (the harness fails if they differ; Userscripts only offers an update when `@version` grows).
 2. `node sim/check.js` prints `ALL PASS`.
-3. Phone plugged in, unlocked, Safari in front: `sim/device-attach.sh`, then
-   `USBMUXD_SOCKET_ADDRESS=/var/run/usbmuxd .venv/bin/pymobiledevice3 apps push --documents com.userscripts.macos instagram-focus.user.js /Documents/instagram-focus.user.js`
+3. Push the branch, then on the phone open the script's commit-pinned raw URL (`https://raw.githubusercontent.com/GeckoKing9/insta-safari/<commit>/instagram-focus.user.js`; the branch URL is cached for 5 minutes) and tap the extensions icon › Userscripts › Install. Don't push the file over USB (`pymobiledevice3 apps push`): it has hung twice and left the phone with an empty script.
 4. `sim/checkall.sh` exits 0 (harness and phone).
 5. Merge to `master`, tag, copy the script into `releases/`.
 
@@ -70,6 +69,7 @@ Rollback: `git checkout v0.2 -- instagram-focus.user.js`, then step 3.
 - `/reel/ID` is a standalone single-video page; `/reels/ID` is the endless feed scroller. Both get the lock. Search results and profile grids open videos as single pages (`/p/ID`, `/user/reel/ID`).
 - Instagram's router renders a route on a `popstate` event, so the script can switch tabs without a reload.
 - Web calls are gated in Instagram's code: on only for a desktop browser on its list (Chrome, Edge, Firefox, Safari 16+). iPhone Safari reads as "Mobile Safari", so mobile web shows no call buttons and its call page can't start a call. "Request Desktop Website" opens the gate for that tab, but the call opens in a new tab without it. The script tells the call page alone that it runs in Mac Safari; the page only allows scripts carrying its nonce, so that override borrows the nonce of Instagram's first script.
+- A conversation's URL (`/direct/t/<id>/`) carries its thread key, not the id the call page wants. The call page takes the key for some chats but shows "Page not found" for a 1:1 chat; Instagram's own buttons pass the IG thread id (39 digits), which only its React tree holds. The script's world can't read that tree, so at the tap a nonce'd page script fetches it.
 - On the search page Instagram's results list sits in a layer above its own tab bar, and DM message rows reveal React / Reply / More on hover, through both a hover handler and `:hover` CSS. Both cost taps on a phone.
 - Never start `usbmuxd` by hand: Ubuntu's socket-activated one grabs the phone by itself, and two daemons fighting over the interface (`LIBUSB_ERROR_BUSY`) kill the USB link.
 - Web Inspector probes stall while the phone is locked; file transfers still work. A probe that hangs the page can drop the USB link; re-attach after any timeout.

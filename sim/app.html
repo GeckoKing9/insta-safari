@@ -24,7 +24,8 @@
 </head>
 <body>
 <div id="root"></div>
-<script>
+<!-- like Instagram: every page runs under a nonce-only script policy (server.py) -->
+<script nonce="t3st">
 (() => {
   const fr = localStorage.getItem('lang') === 'fr';
   const T = fr ? {
@@ -187,8 +188,35 @@
     else if (p.startsWith('/notifications')) { html = views.notifications(); setTimeout(views.notificationsLate, 400); }
     else html = views.other();
     document.getElementById('root').innerHTML = html;
+    reactTree();
     wire();
   };
+
+  // Instagram's React tree as the call buttons read it (measured on the phone 2026-11-09): React's container is a
+  // div under <body>; a route's context node holds the route object (value): its params.thread_key (the id in the
+  // URL) and its view's props.thread_igid (the IG thread id the call page wants; a 1:1 chat's thread key gets "Page
+  // not found" there). Traps for a loose lookup: a router above it that also holds the current key, with another
+  // chat's id in its value and in a kept-alive inbox row (its element and its fiber), and another conversation's
+  // route still mounted ahead of this one.
+  // noIgid=1: no route has an IG thread id; noIgid=current: only this conversation's route lacks it (the script must
+  // fall back to the URL's id, never take another chat's); noReact=1: no React container; badNonce=1: the first
+  // nonce'd script carries a stale nonce (the page refuses the script made with it)
+  const igid = (k) => '3402823668417103' + String(k).padStart(23, '0');
+  const fiber = (props, child = null, sibling = null) => ({ memoizedProps: props, child, sibling });
+  const route = (k, current) => {
+    const none = localStorage.getItem('noIgid') === '1' || (current && localStorage.getItem('noIgid') === 'current');
+    return fiber({ value: { params: { thread_key: k }, url: `/direct/t/${k}/`, rootView: { props: none ? {} : { thread_igid: igid(k), thread_fbid: '4' + k } } } });
+  };
+  const reactTree = () => {
+    if (localStorage.getItem('noReact') === '1') return;
+    const m = /^\/direct\/t\/(\d+)/.exec(location.pathname);
+    const row = { thread: { thread_igid: igid(7) } };
+    const routes = fiber({ list: true }, fiber(row), route('9'));
+    if (m) routes.sibling.sibling = route(m[1], true);
+    const router = fiber({ value: { params: m ? { thread_key: m[1] } : {}, lastThread: { thread_igid: igid(8) } }, children: [{ props: row }] }, routes);
+    document.getElementById('root').__reactContainer$fx = { stateNode: { current: fiber(null, fiber({ app: true }, router)) } };
+  };
+  if (localStorage.getItem('badNonce') === '1') { const d = document.createElement('script'); d.type = 'text/plain'; d.setAttribute('nonce', 'stale'); document.head.prepend(d); }
 
   const wire = () => {
     for (const a of document.querySelectorAll('a[data-spa]')) {

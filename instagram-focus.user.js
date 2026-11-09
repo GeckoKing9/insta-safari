@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Focus
 // @namespace    https://github.com/GeckoKing9/insta-safari
-// @version      22
+// @version      25
 // @description  Instagram web without the Reels feed, the Explore grid (search stays), ads, suggested accounts or "open the app" prompts; four even tabs, one tap per action. Toggles below.
 // @homepageURL  https://github.com/GeckoKing9/insta-safari
 // @updateURL    https://raw.githubusercontent.com/GeckoKing9/insta-safari/master/instagram-focus.user.js
@@ -43,7 +43,7 @@
           'Ouvrir l’application', "Ouvrir l'application", 'Utiliser l’application', "Utiliser l'application",
           'Télécharger l’application', "Télécharger l'application", 'Obtenir l’application'],
   };
-  const SITE_VERSION = '22'; // keep equal to @version above: Userscripts offers an update only when @version grows
+  const SITE_VERSION = '25'; // keep equal to @version above: Userscripts offers an update only when @version grows
 
   // 7. Calls, part 1 (first, before the page parses any script). Instagram's web calls (its /call/ page, opened in a
   // new tab) start only when its code believes the browser is a desktop one on its list, which includes Safari 16+.
@@ -420,8 +420,8 @@
     const fresh = buildBar(); bar.replaceWith(fresh); bar = fresh;
   });
   // 7. Calls, part 2: Audio / Video call buttons in a DM conversation's header (Instagram shows its own only on desktop),
-  // opening its call page for this conversation in a new tab, as its desktop buttons do. The conversation id in the
-  // URL is the call's ig_thread_id (checked on the phone). Icons: Instagram's own (measured on its desktop header).
+  // opening its call page for this conversation in a new tab, as its desktop buttons do, with the IG thread id they
+  // pass (callThread below). Icons: Instagram's own (measured on its desktop header).
   const CALL_ICONS = {
     audio: [['path', { d: 'M18.227 22.912c-4.913 0-9.286-3.627-11.486-5.828C4.486 14.83.731 10.291.921 5.231a3.289 3.289 0 0 1 .908-2.138 17.116 17.116 0 0 1 1.865-1.71 2.307 2.307 0 0 1 3.004.174 13.283 13.283 0 0 1 3.658 5.325 2.551 2.551 0 0 1-.19 1.941l-.455.853a.463.463 0 0 0-.024.387 7.57 7.57 0 0 0 4.077 4.075.455.455 0 0 0 .386-.024l.853-.455a2.548 2.548 0 0 1 1.94-.19 13.278 13.278 0 0 1 5.326 3.658 2.309 2.309 0 0 1 .174 3.003 17.319 17.319 0 0 1-1.71 1.866 3.29 3.29 0 0 1-2.138.91 10.27 10.27 0 0 1-.368.006Zm-13.144-20a.27.27 0 0 0-.167.054A15.121 15.121 0 0 0 3.28 4.47a1.289 1.289 0 0 0-.36.836c-.161 4.301 3.21 8.34 5.235 10.364s6.06 5.403 10.366 5.236a1.284 1.284 0 0 0 .835-.36 15.217 15.217 0 0 0 1.504-1.637.324.324 0 0 0-.047-.41 11.62 11.62 0 0 0-4.457-3.119.545.545 0 0 0-.411.044l-.854.455a2.452 2.452 0 0 1-2.071.116 9.571 9.571 0 0 1-5.189-5.188 2.457 2.457 0 0 1 .115-2.071l.456-.855a.544.544 0 0 0 .043-.41 11.629 11.629 0 0 0-3.118-4.458.36.36 0 0 0-.244-.1Z' }]],
     video: [['rect', { ...LINE, height: '18', rx: '3', width: '16.999', x: '1', y: '3' }],
@@ -430,7 +430,42 @@
   const INFO = 'svg[aria-label="Conversation information"], svg[aria-label="Informations sur la conversation"]';
   let callRow = null, callsUntil = 0;
   const threadId = () => (/^\/direct\/t\/(\d+)\/?$/.exec(location.pathname) || [])[1];
-  const call = (video) => { const id = threadId(); if (id) window.open(`/call/?has_video=${video}&ig_thread_id=${id}`, '_blank'); };
+  // The call page wants the IG thread id (thread_igid), which Instagram's desktop buttons pass. The id in the URL is
+  // the conversation's thread key: the call page takes it for some chats but answers "Page not found" for a 1:1 chat
+  // (measured 2026-11-09: a 1:1 chat's 15-digit key got that page, its 39-digit IG thread id the call screen; a
+  // group's IG thread id got the group call screen). The IG thread id is only in Instagram's React tree, which this
+  // script's world cannot read, so a page script finds the route object for this conversation (a context node's
+  // value whose params.thread_key is this key) and takes the thread_igid of that route's own view, nothing nearby;
+  // breadth first, as route nodes sit near the top and message lists far below. It answers through one attribute.
+  const findIgThread = (key) => `(() => { const root = document.documentElement;
+    try {
+      const want = ${JSON.stringify(key)}, read = (o, k) => { try { return o[k]; } catch { return undefined; } };
+      const host = [...document.querySelectorAll('body > div')].find((e) => Object.keys(e).some((k) => k.startsWith('__reactContainer$')));
+      if (!host) { root.dataset.focusCallId = 'no-react'; return; }
+      const c = host[Object.keys(host).find((k) => k.startsWith('__reactContainer$'))];
+      const queue = [read(read(c, 'stateNode'), 'current') || c];
+      for (let i = 0; i < queue.length && i < 20000; i++) {
+        const route = read(read(queue[i], 'memoizedProps'), 'value');
+        if (read(read(route, 'params'), 'thread_key') === want) {
+          const id = ['rootView', 'hostableView'].map((v) => read(read(read(route, v), 'props'), 'thread_igid')).find((t) => /^\\d+$/.test(t));
+          if (id) { root.dataset.focusCallId = id; return; }
+        }
+        for (let ch = read(queue[i], 'child'); ch; ch = read(ch, 'sibling')) queue.push(ch);
+      }
+      root.dataset.focusCallId = 'not-found';
+    } catch { root.dataset.focusCallId = 'error'; }
+  })();`;
+  const callThread = (key) => {
+    const root = document.documentElement;
+    delete root.dataset.focusCallId;
+    runInPage(findIgThread(key), document.querySelector('script[nonce]')?.nonce || ''); // none: a page without that policy
+    const got = root.dataset.focusCallId, id = /^\d+$/.test(got || '') ? got : null;
+    // what the call used stays on <html> for the phone probes, like the call page's marks: igid, or why the URL's id
+    // was used as before v23 (not-found, no-react, error, blocked: the page script never ran)
+    root.dataset.focusCallId = id ? 'igid' : got || 'blocked';
+    return id || key;
+  };
+  const call = (video) => { const key = threadId(); if (key) window.open(`/call/?has_video=${video}&ig_thread_id=${callThread(key)}`, '_blank'); };
   const syncCalls = () => {
     if (!threadId()) { callRow?.remove(); return; } // the header may outlive the conversation
     if (!CFG.calls || !phoneLayout() || callRow?.isConnected) return;

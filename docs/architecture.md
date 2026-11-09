@@ -36,8 +36,13 @@ instagram.com (content world, no frames). Everything is a toggle in `CFG`. No bu
    page's code it runs in Mac Safari (userAgent, appVersion, platform), with a script that borrows the nonce of
    Instagram's first script tag (the page allows only nonce'd scripts); `data-focus-call-ua` records whether that ran
    early or late. The one-tap changes stay off there. Part 2 adds Audio / Video call buttons to a conversation's header
-   on phone layouts; they read the conversation id at the tap and open `/call/?has_video=...&ig_thread_id=<id>` in a new
-   tab, as Instagram's desktop buttons do. Instagram computes its call gate once, before the script runs on the call
+   on phone layouts; at the tap they open `/call/?has_video=...&ig_thread_id=<IG thread id>` in a new tab, as Instagram's
+   desktop buttons do. The id in the conversation's URL is its thread key, which the call page refuses for a 1:1 chat
+   ("Page not found"); the IG thread id (`thread_igid`) lives only in Instagram's React tree, out of reach of the
+   script's isolated world, so a nonce'd page script walks the tree breadth first to the route object whose
+   `params.thread_key` is this key and takes `rootView.props.thread_igid` (or `hostableView`'s) of that route only;
+   it answers through `data-focus-call-id`, which then records `igid` or why the URL's id was used (`not-found`,
+   `no-react`, `error`, `blocked`). Instagram computes its call gate once, before the script runs on the call
    page, so once its module exists the two closed gate functions (`isSupportedClient`, `isSupportedOutboundClient`)
    are replaced; they are looked up on the module at each use. Part 3 fits the desktop call screen (a 1024 px row) to
    the phone: ancestors of buttons wider than the screen fit it, rows of panels stack, rows of small controls stay.

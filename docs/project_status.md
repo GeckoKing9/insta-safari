@@ -4,8 +4,8 @@
 page on "Page not found" for a friend's 1:1 chat because they passed the URL's thread key; they now pass Instagram's
 IG thread id, read from its React tree at the tap. Checked on the iPhone: the installed copy is byte-for-byte v25;
 DEVICE PASS; the call button's lookup reports `igid` from the real script world; the call page for that id shows
-"Ready to call?" with Start call tappable, for the 1:1 chat and for a group. No call was placed in testing; the owner
-places the first real one.
+"Ready to call?" with Start call tappable, for the 1:1 chat and for a group. The owner then called the friend from the
+phone on v25: working.
 
 How calls work: the conversation header gets Audio / Video call buttons, which open the call page with the IG
 thread id; the call page is told it runs in Mac Safari and Instagram's outbound call gate is opened (it is computed
